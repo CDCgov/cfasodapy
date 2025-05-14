@@ -15,6 +15,19 @@ class Query:
         verbose=True,
     ):
         """
+        Build a query object for a Socrata dataset
+
+        See <https://dev.socrata.com/docs/queries/> for definitions of the clauses.
+        Supported clauses are:
+            - select
+            - where
+            - group
+            - having
+            - limit
+            - offset
+
+        Note the clause "order" is not supported because it is used internally for pagination.
+
         Args:
             domain (str): base URL
             id (str): dataset ID
@@ -22,6 +35,9 @@ class Query:
             app_token (str, optional): Socrata developer app token, or None
             page_size (int, optional): Page size. Defaults to 1 million.
             verbose (bool): If True (default), print progress
+
+        Returns:
+            Query
         """
         self.domain = domain
         self.id = id
@@ -43,7 +59,7 @@ class Query:
         """
         if self.verbose:
             print(
-                f"Downloading dataset {id=}: {self.n_rows} rows in {self.n_pages} page(s) of {self.page_size} rows each"
+                f"Downloading dataset {self.domain} {self.id}: {self.n_rows} rows in {self.n_pages} page(s) of {self.page_size} rows each"
             )
 
         for i in range(self.n_pages):
@@ -109,17 +125,6 @@ class Query:
     ) -> str:
         """
         Build a URL for the Socrata API
-
-        See <https://dev.socrata.com/docs/queries/> for definitions of the clauses.
-        Supported clauses are:
-            - select
-            - where
-            - group
-            - having
-            - limit
-            - offset
-
-        The clause "order" is not supported because it is used internally for pagination.
 
         Args:
             domain (str): base URL
