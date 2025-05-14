@@ -12,8 +12,6 @@ A [sodapy](https://pypi.org/project/sodapy/) successor
 
 - Scott Olesen <ulp7@cdc.gov> (CDC/IOD/ORR/CFA)
 
---
-
 ## Disclaimers
 
 ### General Disclaimer
