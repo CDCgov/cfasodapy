@@ -1,117 +1,160 @@
 import math
-from typing import Iterable, List, Optional
+from typing import Any, Iterator, List, Optional
 
 import requests
 
 
-def _n_dataset_rows(domain: str, id: str, app_token: Optional[str] = None) -> int:
-    """
-    Get the number of rows in a dataset
+class Query:
+    def __init__(
+        self,
+        domain: str,
+        id: str,
+        clauses: Optional[dict[str, Any]] = None,
+        app_token: Optional[str] = None,
+        page_size=100_000,
+        verbose=True,
+    ):
+        """
+        Build a query object for a Socrata dataset
 
-    Args:
-        domain (str): base URL
-        id (str): dataset ID
-        app_token (str, optional): Socrata developer app token, or None
+        See <https://dev.socrata.com/docs/queries/> for definitions of the clauses.
+        Supported clauses are:
+            - select
+            - where
+            - group
+            - having
+            - limit
+            - offset
 
-    Returns:
-        int: number of rows in the dataset
-    """
-    url = f"https://{domain}/resource/{id}.json?$select=count(:id)"
-    r = _get_request(url, app_token=app_token)
+        Note the clause "order" is not supported because it is used internally for pagination.
 
-    result = r.json()
-    assert len(result) == 1
-    assert "count_id" in result[0]
-    return int(result[0]["count_id"])
+        Args:
+            domain (str): base URL
+            id (str): dataset ID
+            clauses (dict, optional): query clauses
+            app_token (str, optional): Socrata developer app token, or None
+            page_size (int, optional): Page size. Defaults to 1 million.
+            verbose (bool): If True (default), print progress
 
+        Returns:
+            Query
+        """
+        self.domain = domain
+        self.id = id
+        self.clauses = clauses or {}
+        self.app_token = app_token
+        self.page_size = page_size
+        self.verbose = verbose
 
-def download_dataset_records(
-    domain: str,
-    id: str,
-    start_record: int,
-    end_record: int,
-    app_token: Optional[str],
-) -> list[dict]:
-    """
-    Download a specific range of rows from a dataset
+        self.url = self._build_url(domain=domain, id=id, clauses=clauses)
+        self.n_rows = self._get_n_rows()
+        self.n_pages = math.ceil(self.n_rows / page_size)
 
-    Args:
-        domain (str, optional): base URL
-        id (str): dataset ID
-        start_record (int): first row (zero-indexed)
-        end_record (int): last row (zero-indexed)
-        app_token (str, optional): Socrata developer app token, or None
+    def __iter__(self) -> Iterator[List[dict]]:
+        """
+        Download a dataset page by page
 
-    Returns:
-        If format is "json", a list. If "csv", then a string
-    """
+        Yields:
+            Sequence of objects returned by download_records()
+        """
+        if self.verbose:
+            print(
+                f"Downloading dataset {self.domain} {self.id}: {self.n_rows} rows in {self.n_pages} page(s) of {self.page_size} rows each"
+            )
 
-    assert end_record >= start_record
-    limit = end_record - start_record + 1
+        for i in range(self.n_pages):
+            if self.verbose:
+                print(f"  Downloading page {i + 1}/{self.n_pages}")
 
-    url = f"https://{domain}/resource/{id}.json?$limit={limit}&$offset={start_record}&$order=:id"
-    r = _get_request(url, app_token=app_token)
+            start = i * self.page_size
+            end = (i + 1) * self.page_size - 1
+            page = self._get_records(start=start, end=end)
 
-    return r.json()
+            assert len(page) > 0
+            assert len(page) <= self.page_size
 
+            yield page
 
-def _get_request(url: str, app_token: Optional[str]) -> requests.Response:
-    payload = {}
-    if app_token is not None:
-        payload["X-App-token"] = app_token
+    def _get_n_rows(self) -> int:
+        """
+        Get the number of rows in the query
 
-    r = requests.get(url, data=payload)
-    if r.status_code == 200:
-        return r
-    else:
-        raise RuntimeError(
-            f"HTTP request failure: url '{url}' failed with code {r.status_code}"
+        Returns:
+            int: number of rows in the dataset
+        """
+
+        url = self._build_url(
+            domain=self.domain,
+            id=self.id,
+            clauses=self.clauses | {"select": "count(:id)"},
+        )
+        result = self._get_request(url, app_token=self.app_token)
+
+        assert len(result) == 1
+        assert "count_id" in result[0]
+        return int(result[0]["count_id"])
+
+    def _get_records(self, start: int, end: int) -> List[dict]:
+        """
+        Download a specific range of rows from a dataset
+
+        Args:
+            start (int): first row (zero-indexed)
+            end (int): last row (zero-indexed)
+
+        Returns:
+            List[dict]: list of records
+        """
+
+        assert end >= start
+        limit = end - start + 1
+
+        url = self._build_url(
+            domain=self.domain,
+            id=self.id,
+            clauses=self.clauses | {"limit": limit, "offset": start},
         )
 
+        return self._get_request(url, app_token=self.app_token)
 
-def download_dataset_pages(
-    domain: str,
-    id: str,
-    app_token: Optional[str],
-    page_size: int = int(1e5),
-    verbose: bool = True,
-) -> Iterable[List[dict]]:
-    """
-    Download a dataset page by page
+    @staticmethod
+    def _build_url(
+        domain: str,
+        id: str,
+        clauses: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """
+        Build a URL for the Socrata API
 
-    Args:
-        domain (str): base URL
-        id (str): dataset ID
-        app_token (str, optional): Socrata developer app token, or None
-        page_size (int, optional): Page size. Defaults to 1 million.
-        verbose (bool): If True (default), print progress
+        Args:
+            domain (str): base URL
+            id (str): dataset ID
+            clauses (dict, optional): query clauses
 
-    Yields:
-        Sequence of objects returned by download_dataset_records()
-    """
-    n_rows = _n_dataset_rows(domain=domain, id=id, app_token=app_token)
-    n_pages = math.ceil(n_rows / page_size)
+        Returns:
+            str: URL
+        """
+        url = f"https://{domain}/resource/{id}.json"
 
-    if verbose:
-        print(
-            f"Downloading dataset {id=}: {n_rows} rows in {n_pages} page(s) of {page_size} rows each"
-        )
+        if clauses is not None:
+            assert set(clauses.keys()).issubset(
+                ["select", "where", "group", "having", "limit", "offset"]
+            )
 
-    for i in range(n_pages):
-        if verbose:
-            print(f"  Downloading page {i + 1}/{n_pages}")
+            url += "?" + "&".join([f"${key}={value}" for key, value in clauses.items()])
 
-        start_record = i * page_size
-        end_record = (i + 1) * page_size - 1
-        page = download_dataset_records(
-            domain=domain,
-            id=id,
-            start_record=start_record,
-            end_record=end_record,
-            app_token=app_token,
-        )
+        return url
 
-        assert len(page) > 0
-        assert len(page) <= page_size
+    @staticmethod
+    def _get_request(url: str, app_token: Optional[str]) -> List[dict]:
+        payload = {}
+        if app_token is not None:
+            payload["X-App-token"] = app_token
 
-        yield page
+        r = requests.get(url, data=payload)
+        if r.status_code == 200:
+            return r.json()
+        else:
+            raise RuntimeError(
+                f"HTTP request failure: url '{url}' failed with code {r.status_code}"
+            )
