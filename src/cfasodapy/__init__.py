@@ -11,7 +11,6 @@ class Query:
         id: str,
         clauses: Optional[dict[str, Any]] = None,
         app_token: Optional[str] = None,
-        page_size=100_000,
         verbose=True,
     ):
         """
@@ -32,7 +31,6 @@ class Query:
             id (str): dataset ID
             clauses (dict, optional): query clauses
             app_token (str, optional): Socrata developer app token, or None
-            page_size (int, optional): Page size. Defaults to 1 million.
             verbose (bool): If True (default), print progress
 
         Returns:
@@ -42,22 +40,45 @@ class Query:
         self.id = id
         self.clauses = clauses or {}
         self.app_token = app_token
-        self.page_size = page_size
         self.verbose = verbose
 
         self.url = self._build_url(domain=domain, id=id)
         self.n_rows = self._get_n_rows()
-        self.n_pages = math.ceil(self.n_rows / page_size)
 
-    def __iter__(self) -> Iterator[List[dict]]:
+    def get_all(self) -> List[dict]:
+        """
+        Download all records from the dataset
+
+        Returns:
+            List[dict]: list of records
+        """
+
+        if self.verbose:
+            print(f"Downloading dataset {self.domain} {self.id}: {self.n_rows} rows")
+
+        result = self._get_request(
+            self.url,
+            params=self.clauses,
+            app_token=self.app_token,
+        )
+
+        if self.verbose:
+            print(f"  Downloaded {len(result)} rows")
+
+        return result
+
+    def get_pages(self, page_size: int = 10_000) -> Iterator[List[dict]]:
         """
         Download a dataset page by page
+
+        Args:
+            page_size (int): number of records per page (default: 10,000)
 
         Queries involving "$limit", "$offset", and "$order" are not supported
         because they are used internally for pagination.
 
         Yields:
-            Sequence of objects returned by download_records()
+            Sequence of pages, each of which is a list of records
         """
         if bad_keys := set(self.clauses.keys()).intersection(
             {"$limit", "$offset", "$order"}
@@ -66,22 +87,24 @@ class Query:
                 f"Clause keys {bad_keys} are not supported in paginated queries."
             )
 
+        n_pages = math.ceil(self.n_rows / page_size)
+
         if self.verbose:
             print(
                 f"Downloading dataset {self.domain} {self.id}: "
-                f"{self.n_rows} rows in {self.n_pages} page(s) of {self.page_size} rows each"
+                f"{self.n_rows} rows in {n_pages} page(s) of {page_size} rows each"
             )
 
-        for i in range(self.n_pages):
+        for i in range(n_pages):
             if self.verbose:
-                print(f"  Downloading page {i + 1}/{self.n_pages}")
+                print(f"  Downloading page {i + 1}/{n_pages}")
 
-            start = i * self.page_size
-            end = (i + 1) * self.page_size - 1
+            start = i * page_size
+            end = (i + 1) * page_size - 1
             page = self._get_records(start=start, end=end)
 
             assert len(page) > 0
-            assert len(page) <= self.page_size
+            assert len(page) <= page_size
 
             yield page
 
