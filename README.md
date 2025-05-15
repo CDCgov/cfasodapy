@@ -2,7 +2,7 @@
 
 ## Overview
 
-A [sodapy](https://pypi.org/project/sodapy/) successor
+A [sodapy](https://pypi.org/project/sodapy/) successor designed for paginated queries.
 
 ## Getting started
 
