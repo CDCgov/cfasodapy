@@ -15,18 +15,17 @@ class Query:
         verbose=True,
     ):
         """
-        Build a query object for a Socrata dataset
+        Build a query for a Socrata dataset
 
         See <https://dev.socrata.com/docs/queries/> for definitions of the clauses.
         Supported clauses are:
-            - select
-            - where
-            - group
-            - having
-            - limit
-            - offset
-
-        Note the clause "order" is not supported because it is used internally for pagination.
+            - $select
+            - $where
+            - $group
+            - $having
+            - $limit
+            - $offset
+            - $order
 
         Args:
             domain (str): base URL
@@ -46,7 +45,7 @@ class Query:
         self.page_size = page_size
         self.verbose = verbose
 
-        self.url = self._build_url(domain=domain, id=id, clauses=clauses)
+        self.url = self._build_url(domain=domain, id=id)
         self.n_rows = self._get_n_rows()
         self.n_pages = math.ceil(self.n_rows / page_size)
 
@@ -54,12 +53,23 @@ class Query:
         """
         Download a dataset page by page
 
+        Queries involving "$limit", "$offset", and "$order" are not supported
+        because they are used internally for pagination.
+
         Yields:
             Sequence of objects returned by download_records()
         """
+        if bad_keys := set(self.clauses.keys()).intersection(
+            {"$limit", "$offset", "$order"}
+        ):
+            raise RuntimeError(
+                f"Clause keys {bad_keys} are not supported in paginated queries."
+            )
+
         if self.verbose:
             print(
-                f"Downloading dataset {self.domain} {self.id}: {self.n_rows} rows in {self.n_pages} page(s) of {self.page_size} rows each"
+                f"Downloading dataset {self.domain} {self.id}: "
+                f"{self.n_rows} rows in {self.n_pages} page(s) of {self.page_size} rows each"
             )
 
         for i in range(self.n_pages):
@@ -82,15 +92,13 @@ class Query:
         Returns:
             int: number of rows in the dataset
         """
-
-        url = self._build_url(
-            domain=self.domain,
-            id=self.id,
-            clauses=self.clauses | {"select": "count(:id)"},
+        result = self._get_request(
+            self.url,
+            params=self.clauses | {"$select": "count(:id)", "$limit": 1},
+            app_token=self.app_token,
         )
-        result = self._get_request(url, app_token=self.app_token)
 
-        assert len(result) == 1
+        assert len(result) == 1, f"Expected length 1, got {len(result)}"
         assert "count_id" in result[0]
         return int(result[0]["count_id"])
 
@@ -109,20 +117,36 @@ class Query:
         assert end >= start
         limit = end - start + 1
 
-        url = self._build_url(
-            domain=self.domain,
-            id=self.id,
-            clauses=self.clauses | {"limit": limit, "offset": start},
+        return self._get_request(
+            self.url,
+            params=self.clauses | {"$limit": limit, "$offset": start},
+            app_token=self.app_token,
         )
 
-        return self._get_request(url, app_token=self.app_token)
+    @staticmethod
+    def _validate_clauses(clauses: Optional[dict] = None) -> None:
+        """
+        Validate the query clauses
+
+        Args:
+            clauses (dict, optional): query clauses
+
+        Raises:
+            RuntimeError: if the clauses are invalid
+        """
+        keys = ["$select", "$where", "$group", "$having", "$limit", "$offset"]
+
+        if clauses is None:
+            pass
+        else:
+            assert isinstance(clauses, dict), "Clauses must be a dictionary."
+            if bad_keys := set(clauses.keys()) - set(keys):
+                raise RuntimeError(
+                    f"Invalid clause keys: {bad_keys}. Supported keys are: {keys}."
+                )
 
     @staticmethod
-    def _build_url(
-        domain: str,
-        id: str,
-        clauses: Optional[dict[str, Any]] = None,
-    ) -> str:
+    def _build_url(domain: str, id: str) -> str:
         """
         Build a URL for the Socrata API
 
@@ -134,24 +158,20 @@ class Query:
         Returns:
             str: URL
         """
-        url = f"https://{domain}/resource/{id}.json"
+        return f"https://{domain}/resource/{id}.json"
 
-        if clauses is not None:
-            assert set(clauses.keys()).issubset(
-                ["select", "where", "group", "having", "limit", "offset"]
-            )
+    @classmethod
+    def _get_request(
+        cls, url: str, params: Optional[dict] = None, app_token: Optional[str] = None
+    ) -> List[dict]:
+        cls._validate_clauses(params)
 
-            url += "?" + "&".join([f"${key}={value}" for key, value in clauses.items()])
-
-        return url
-
-    @staticmethod
-    def _get_request(url: str, app_token: Optional[str]) -> List[dict]:
-        payload = {}
         if app_token is not None:
-            payload["X-App-token"] = app_token
+            data = {"X-App-token": app_token}
+        else:
+            data = None
 
-        r = requests.get(url, data=payload)
+        r = requests.get(url, data=data, params=params)
         if r.status_code == 200:
             return r.json()
         else:
