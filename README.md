@@ -6,7 +6,33 @@ A [sodapy](https://pypi.org/project/sodapy/) successor
 
 ## Getting started
 
-- Install using uv
+`cfasodapy` interacts with Socrata datasets via a query object. For example, to query [this CDC dataset](https://data.cdc.gov/Public-Health-Surveillance/Rates-of-Laboratory-Confirmed-RSV-COVID-19-and-Flu/kvib-3txy/about_data), construct the query:
+
+```python
+q = Query(domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN)
+```
+
+You can also limit your query using [Socrata query clauses](https://dev.socrata.com/docs/queries/):
+
+```python
+q = Query(
+    domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN,
+    clauses={"$where": "sex='Overall' AND site='Overall'"}
+)
+```
+
+Having constructed the query, access the data page by page. Each page is a list of records:
+
+```python
+for page in q.get_pages():
+    print(page)
+```
+
+It is possible to attempt to get all the records at once, but note that these queries might time out or require an explicit `$limit` clause:
+
+```python
+print(q.get_all())
+```
 
 ## Project admins
 
