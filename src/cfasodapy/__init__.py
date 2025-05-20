@@ -1,7 +1,24 @@
-import math
 from typing import Any, Iterator, List, Optional
+from urllib.parse import urlunparse
 
 import requests
+
+
+def _int_divide_ceiling(a, b):
+    """
+    Equivalent of a // b, but with
+    ceiling rather than floor behavior.
+
+    Follows the implementation here: https://stackoverflow.com/a/17511341
+
+    Args:
+        a (int): dividend
+        b (int): divisor
+
+    Returns:
+        int: (1 + a // b) if a is not divisible by b, otherwise (a // b)
+    """
+    return -(a // -b)
 
 
 class Query:
@@ -41,9 +58,6 @@ class Query:
         self.clauses = clauses or {}
         self.app_token = app_token
         self.verbose = verbose
-
-        self.url = self._build_url(domain=domain, id=id)
-        self.n_rows = self._get_n_rows()
 
     def get_all(self) -> List[dict]:
         """
@@ -87,12 +101,14 @@ class Query:
                 f"Clause keys {bad_keys} are not supported in paginated queries."
             )
 
-        n_pages = math.ceil(self.n_rows / page_size)
+        row_count = self.n_rows
+        n_pages = _int_divide_ceiling(row_count, page_size)
 
         if self.verbose:
             print(
                 f"Downloading dataset {self.domain} {self.id}: "
-                f"{self.n_rows} rows in {n_pages} page(s) of {page_size} rows each"
+                f"{row_count} rows in {n_pages} page(s) of at most "
+                f"{page_size} rows each..."
             )
 
         for i in range(n_pages):
@@ -108,9 +124,10 @@ class Query:
 
             yield page
 
-    def _get_n_rows(self) -> int:
+    @property
+    def n_rows(self) -> int:
         """
-        Get the number of rows in the query
+        The number of rows in the query
 
         Returns:
             int: number of rows in the dataset
@@ -168,20 +185,17 @@ class Query:
                     f"Invalid clause keys: {bad_keys}. Supported keys are: {keys}."
                 )
 
-    @staticmethod
-    def _build_url(domain: str, id: str) -> str:
+    @property
+    def url(self) -> str:
         """
-        Build a URL for the Socrata API
-
-        Args:
-            domain (str): base URL
-            id (str): dataset ID
-            clauses (dict, optional): query clauses
+        Socrata API base URL for the query
 
         Returns:
             str: URL
         """
-        return f"https://{domain}/resource/{id}.json"
+        return urlunparse(
+            ("https", self.domain, f"resource/{self.id}.json", "", "", "")
+        )
 
     @classmethod
     def _get_request(
