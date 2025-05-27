@@ -11,7 +11,7 @@ def test_build_url():
     id = "abc123"
     expected_url = "https://data.cdc.gov/resource/abc123.json"
 
-    assert Query._build_url(domain=domain, id=id) == expected_url
+    assert Query(domain=domain, id=id).url == expected_url
 
 
 def test_validate_clauses():
