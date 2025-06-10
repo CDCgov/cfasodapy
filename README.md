@@ -17,7 +17,7 @@ You can also limit your query using [Socrata query clauses](https://dev.socrata.
 ```python
 q = Query(
     domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN,
-    clauses={"$where": "sex='Overall' AND site='Overall'"}
+    where="sex='Overall' AND site='Overall'"
 )
 ```
 
