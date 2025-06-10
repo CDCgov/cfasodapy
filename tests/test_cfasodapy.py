@@ -1,5 +1,3 @@
-import pytest
-
 from cfasodapy import Query
 
 
@@ -14,6 +12,15 @@ def test_build_url():
     assert Query(domain=domain, id=id).url == expected_url
 
 
-def test_validate_clauses():
-    with pytest.raises(RuntimeError, match="select"):
-        Query._validate_clauses(clauses={"select": "value"})
+def test_build_payload_select_string():
+    select = "field1"
+    expected_payload = {"$select": '"field1"', "$offset": 0}
+
+    assert Query._build_payload(select=select) == expected_payload
+
+
+def test_build_payload_select_list():
+    select = ["field1", "field2"]
+    expected_payload = {"$select": '"field1","field2"', "$offset": 0}
+
+    assert Query._build_payload(select=select) == expected_payload

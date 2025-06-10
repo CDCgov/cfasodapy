@@ -31,7 +31,7 @@ class Query:
         select: Optional[str | Sequence[str]] = None,
         where: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None,
+        offset: int = 0,
         app_token: Optional[str] = None,
         verbose=True,
     ):
@@ -43,13 +43,13 @@ class Query:
         Args:
             domain (str): base URL
             id (str): dataset ID
-            select (str or Sequence[str], optional): columns to select
+            select (str or Sequence[str], optional): select clause (i.e., column
+                name or comma-separated list of column names) or a list of columns
             where (str, optional): filter condition
             limit (int, optional): maximum number of records to return
-            offset (int, optional): number of records to skip
-            clauses (dict, optional): query clauses
+            offset (int): number of records to skip. Default: 0.
             app_token (str, optional): Socrata developer app token, or None
-            verbose (bool): If True (default), print progress
+            verbose (bool): If True (default), print progress and warnings.
 
         Returns:
             Query
@@ -76,7 +76,7 @@ class Query:
 
         result = self._get_request(
             self.url,
-            params=self._build_clauses(
+            params=self._build_payload(
                 select=self.select,
                 where=self.where,
                 limit=self.limit,
@@ -134,7 +134,7 @@ class Query:
         """
         result = self._get_request(
             self.url,
-            params=self._build_clauses(select="count(:id)", where=self.where),
+            params=self._build_payload(select="count(:id)", where=self.where, limit=1),
             app_token=self.app_token,
         )
 
@@ -143,30 +143,24 @@ class Query:
         n_dataset_rows = int(result[0]["count_id"])
 
         if n_dataset_rows == 0:
-            warnings.warn(
-                f"Dataset {self.id} at {self.domain} has no rows. "
-                "This may be due to an bad query."
-            )
+            if self.verbose:
+                warnings.warn(
+                    f"Dataset {self.id} at {self.domain} has no rows. "
+                    "This may be due to an bad query."
+                )
             return 0
 
-        offset = self.offset or 0
-        n_rows_after_offset = n_dataset_rows - (self.offset or 0)
+        n_rows_after_offset = n_dataset_rows - self.offset
 
         if n_rows_after_offset < 0:
-            warnings.warn(
-                f"Offset {self.offset} is larger than the number of rows"
-                f" in the dataset ({n_dataset_rows})."
-            )
+            if self.verbose:
+                warnings.warn(
+                    f"Offset {self.offset} is larger than the number of rows"
+                    f" in the dataset ({n_dataset_rows})."
+                )
             return 0
 
-        if self.limit is not None and self.limit > n_rows_after_offset:
-            warnings.warn(
-                f"Limit {self.limit} is larger than the number of rows"
-                f" ({n_rows_after_offset}) after offset ({offset})."
-            )
-            return 0
-
-        if self.limit is None:
+        if self.limit is None or self.limit > n_rows_after_offset:
             return n_rows_after_offset
         else:
             return n_rows_after_offset - self.limit
@@ -185,11 +179,14 @@ class Query:
         """
 
         assert end >= start
+        assert (
+            self.limit is None or end < self.limit
+        ), f"End index {end} is larger than limit {self.limit}."
         n_rows = end - start + 1
 
         return self._get_request(
             self.url,
-            params=self._build_clauses(
+            params=self._build_payload(
                 select=self.select,
                 where=self.where,
                 offset=self.offset + start,
@@ -199,24 +196,26 @@ class Query:
         )
 
     @classmethod
-    def _build_clauses(
+    def _build_payload(
         cls,
         select: Optional[str | Sequence[str]] = None,
         where: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None,
+        offset: int = 0,
     ) -> dict:
+        """
+        Build the payload for the request
+        """
         clauses = {}
 
         if select is None:
             pass
         elif isinstance(select, str):
-            cls._assert_no_quotes(select)
             clauses["$select"] = select
         else:
             for x in select:
-                cls._assert_no_quotes(x)
-            clauses["$select"] = ",".join(['"' + x + '"' for x in select])
+                assert "," not in x, f"Comma(s) detected in select column name: {x}"
+            clauses["$select"] = ",".join(select)
 
         if where is not None:
             clauses["$where"] = where
@@ -226,38 +225,11 @@ class Query:
             assert limit > 0
             clauses["$limit"] = limit
 
-        if offset is not None:
-            assert isinstance(offset, int)
-            assert offset >= 0
-            clauses["$offset"] = offset
+        assert isinstance(offset, int)
+        assert offset >= 0
+        clauses["$offset"] = offset
 
         return clauses
-
-    @staticmethod
-    def _assert_no_quotes(x: str) -> None:
-        if '"' in x or "'" in x:
-            raise RuntimeError("Quotes detected in string {x}")
-
-    def _validate_clauses(clauses: Optional[dict] = None) -> None:
-        """
-        Validate the query clauses
-
-        Args:
-            clauses (dict, optional): query clauses
-
-        Raises:
-            RuntimeError: if the clauses are invalid
-        """
-        keys = ["$select", "$where", "$group", "$having", "$limit", "$offset"]
-
-        if clauses is None:
-            pass
-        else:
-            assert isinstance(clauses, dict), "Clauses must be a dictionary."
-            if bad_keys := set(clauses.keys()) - set(keys):
-                raise RuntimeError(
-                    f"Invalid clause keys: {bad_keys}. Supported keys are: {keys}."
-                )
 
     @property
     def url(self) -> str:
@@ -275,17 +247,11 @@ class Query:
     def _get_request(
         cls, url: str, params: Optional[dict] = None, app_token: Optional[str] = None
     ) -> list[dict]:
-        cls._validate_clauses(params)
-
         if app_token is not None:
             data = {"X-App-token": app_token}
         else:
             data = None
 
         r = requests.get(url, data=data, params=params)
-        if r.status_code == 200:
-            return r.json()
-        else:
-            raise RuntimeError(
-                f"HTTP request failure: url '{url}' failed with code {r.status_code}"
-            )
+        r.raise_for_status()
+        return r.json()
