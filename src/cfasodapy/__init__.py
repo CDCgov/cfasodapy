@@ -1,10 +1,12 @@
-from typing import Any, Iterator, List, Optional
+import warnings
+from collections.abc import Iterator, Sequence
+from typing import Optional
 from urllib.parse import urlunparse
 
 import requests
 
 
-def _int_divide_ceiling(a, b):
+def _int_divide_ceiling(a: int, b: int) -> int:
     """
     Equivalent of a // b, but with
     ceiling rather than floor behavior.
@@ -26,26 +28,25 @@ class Query:
         self,
         domain: str,
         id: str,
-        clauses: Optional[dict[str, Any]] = None,
+        select: Optional[str | Sequence[str]] = None,
+        where: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
         app_token: Optional[str] = None,
         verbose=True,
     ):
         """
         Build a query for a Socrata dataset
 
-        See <https://dev.socrata.com/docs/queries/> for definitions of the clauses.
-        Supported clauses are:
-            - $select
-            - $where
-            - $group
-            - $having
-            - $limit
-            - $offset
-            - $order
+        Note that $group, $having, and $order clauses are not supported.
 
         Args:
             domain (str): base URL
             id (str): dataset ID
+            select (str or Sequence[str], optional): columns to select
+            where (str, optional): filter condition
+            limit (int, optional): maximum number of records to return
+            offset (int, optional): number of records to skip
             clauses (dict, optional): query clauses
             app_token (str, optional): Socrata developer app token, or None
             verbose (bool): If True (default), print progress
@@ -55,16 +56,19 @@ class Query:
         """
         self.domain = domain
         self.id = id
-        self.clauses = clauses or {}
+        self.select = select
+        self.where = where
+        self.limit = limit
+        self.offset = offset
         self.app_token = app_token
         self.verbose = verbose
 
-    def get_all(self) -> List[dict]:
+    def get_all(self) -> list[dict]:
         """
         Download all records from the dataset
 
         Returns:
-            List[dict]: list of records
+            list[dict]: list of records
         """
 
         if self.verbose:
@@ -72,7 +76,12 @@ class Query:
 
         result = self._get_request(
             self.url,
-            params=self.clauses,
+            params=self._build_clauses(
+                select=self.select,
+                where=self.where,
+                limit=self.limit,
+                offset=self.offset,
+            ),
             app_token=self.app_token,
         )
 
@@ -81,25 +90,16 @@ class Query:
 
         return result
 
-    def get_pages(self, page_size: int = 10_000) -> Iterator[List[dict]]:
+    def get_pages(self, page_size: int = 10_000) -> Iterator[list[dict]]:
         """
         Download a dataset page by page
 
         Args:
             page_size (int): number of records per page (default: 10,000)
 
-        Queries involving "$limit", "$offset", and "$order" are not supported
-        because they are used internally for pagination.
-
         Yields:
             Sequence of pages, each of which is a list of records
         """
-        if bad_keys := set(self.clauses.keys()).intersection(
-            {"$limit", "$offset", "$order"}
-        ):
-            raise RuntimeError(
-                f"Clause keys {bad_keys} are not supported in paginated queries."
-            )
 
         row_count = self.n_rows
         n_pages = _int_divide_ceiling(row_count, page_size)
@@ -134,36 +134,110 @@ class Query:
         """
         result = self._get_request(
             self.url,
-            params=self.clauses | {"$select": "count(:id)", "$limit": 1},
+            params=self._build_clauses(select="count(:id)", where=self.where),
             app_token=self.app_token,
         )
 
         assert len(result) == 1, f"Expected length 1, got {len(result)}"
         assert "count_id" in result[0]
-        return int(result[0]["count_id"])
+        n_dataset_rows = int(result[0]["count_id"])
 
-    def _get_records(self, start: int, end: int) -> List[dict]:
+        if n_dataset_rows == 0:
+            warnings.warn(
+                f"Dataset {self.id} at {self.domain} has no rows. "
+                "This may be due to an bad query."
+            )
+            return 0
+
+        offset = self.offset or 0
+        n_rows_after_offset = n_dataset_rows - (self.offset or 0)
+
+        if n_rows_after_offset < 0:
+            warnings.warn(
+                f"Offset {self.offset} is larger than the number of rows"
+                f" in the dataset ({n_dataset_rows})."
+            )
+            return 0
+
+        if self.limit is not None and self.limit > n_rows_after_offset:
+            warnings.warn(
+                f"Limit {self.limit} is larger than the number of rows"
+                f" ({n_rows_after_offset}) after offset ({offset})."
+            )
+            return 0
+
+        if self.limit is None:
+            return n_rows_after_offset
+        else:
+            return n_rows_after_offset - self.limit
+
+    def _get_records(self, start: int, end: int) -> list[dict]:
         """
-        Download a specific range of rows from a dataset
+        Download a specific range of rows from a query, accounting
+        for the offset and limit.
 
         Args:
             start (int): first row (zero-indexed)
             end (int): last row (zero-indexed)
 
         Returns:
-            List[dict]: list of records
+            list[dict]: list of records
         """
 
         assert end >= start
-        limit = end - start + 1
+        n_rows = end - start + 1
 
         return self._get_request(
             self.url,
-            params=self.clauses | {"$limit": limit, "$offset": start},
+            params=self._build_clauses(
+                select=self.select,
+                where=self.where,
+                offset=self.offset + start,
+                limit=n_rows,
+            ),
             app_token=self.app_token,
         )
 
+    @classmethod
+    def _build_clauses(
+        cls,
+        select: Optional[str | Sequence[str]] = None,
+        where: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> dict:
+        clauses = {}
+
+        if select is None:
+            pass
+        elif isinstance(select, str):
+            cls._assert_no_quotes(select)
+            clauses["$select"] = select
+        else:
+            for x in select:
+                cls._assert_no_quotes(x)
+            clauses["$select"] = ",".join(['"' + x + '"' for x in select])
+
+        if where is not None:
+            clauses["$where"] = where
+
+        if limit is not None:
+            assert isinstance(limit, int)
+            assert limit > 0
+            clauses["$limit"] = limit
+
+        if offset is not None:
+            assert isinstance(offset, int)
+            assert offset >= 0
+            clauses["$offset"] = offset
+
+        return clauses
+
     @staticmethod
+    def _assert_no_quotes(x: str) -> None:
+        if '"' in x or "'" in x:
+            raise RuntimeError("Quotes detected in string {x}")
+
     def _validate_clauses(clauses: Optional[dict] = None) -> None:
         """
         Validate the query clauses
@@ -200,7 +274,7 @@ class Query:
     @classmethod
     def _get_request(
         cls, url: str, params: Optional[dict] = None, app_token: Optional[str] = None
-    ) -> List[dict]:
+    ) -> list[dict]:
         cls._validate_clauses(params)
 
         if app_token is not None:
