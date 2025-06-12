@@ -18,4 +18,4 @@ jobs:
       - name: Set up python
         uses: actions/setup-python@v5
       - name: Run tests
-      - run: uv run pytest
+        run: uv run pytest
