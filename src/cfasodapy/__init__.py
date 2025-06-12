@@ -43,8 +43,10 @@ class Query:
         Args:
             domain (str): base URL
             id (str): dataset ID
-            select (str or Sequence[str], optional): select clause (i.e., column
-                name or comma-separated list of column names) or a list of columns
+            select (str or Sequence[str], optional): select clause
+                (e.g., a column name or a comma-separated list of column names)
+                or a list of strings that will be comma-joined (e.g., a list
+                of column names)
             where (str, optional): filter condition
             limit (int, optional): maximum number of records to return
             offset (int): number of records to skip. Default: 0.
@@ -213,8 +215,6 @@ class Query:
         elif isinstance(select, str):
             clauses["$select"] = select
         else:
-            for x in select:
-                assert "," not in x, f"Comma(s) detected in select column name: {x}"
             clauses["$select"] = ",".join(select)
 
         if where is not None:
