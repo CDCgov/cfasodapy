@@ -103,7 +103,11 @@ class Query:
             Sequence of pages, each of which is a list of records
         """
 
-        row_count = self.n_rows
+        if self.limit is None:
+            row_count = self.n_rows
+        else:
+            row_count = min(self.limit, self.n_rows)
+
         n_pages = _int_divide_ceiling(row_count, page_size)
 
         if self.verbose:
@@ -117,8 +121,14 @@ class Query:
             if self.verbose:
                 print(f"  Downloading page {i + 1}/{n_pages}")
 
-            start = i * page_size
-            end = (i + 1) * page_size - 1
+            start = self.offset + i * page_size
+
+            # on the last page, only go up to the row count
+            if i + 1 == n_pages:
+                end = self.offset + row_count - 1
+            else:
+                end = self.offset + (i + 1) * page_size - 1
+
             page = self._get_records(start=start, end=end)
 
             assert len(page) > 0
