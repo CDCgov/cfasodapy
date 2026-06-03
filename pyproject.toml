@@ -5,7 +5,7 @@ description = "Query Socrata databases"
 readme = "README.md"
 authors = [{ name = "Scott Olesen", email = "ulp7@cdc.gov" }]
 requires-python = ">=3.10"
-dependencies = ["requests>=2.30"]
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/CDCgov/cfasodapy"
