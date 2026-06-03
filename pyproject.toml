@@ -9,6 +9,7 @@ dependencies = ["requests>=2.30"]
 
 [project.urls]
 Repository = "https://github.com/CDCgov/cfasodapy"
+Documentation = "https://cdcgov.github.io/cfasodapy/"
 
 [build-system]
 requires = ["hatchling"]
@@ -16,7 +17,4 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = ["pytest>=8.3.5"]
-docs = [
-    "mkdocstrings-python>=2.0.3",
-    "zensical>=0.0.43",
-]
+docs = ["mkdocstrings-python>=2.0.3", "zensical>=0.0.43"]
