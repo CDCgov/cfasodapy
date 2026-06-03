@@ -1,6 +1,6 @@
 [project]
 name = "cfasodapy"
-version = "0.1.2"
+version = "0.2.0"
 description = "Query Socrata databases"
 readme = "README.md"
 authors = [{ name = "Scott Olesen", email = "ulp7@cdc.gov" }]
@@ -16,3 +16,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = ["pytest>=8.3.5"]
+docs = [
+    "mkdocstrings-python>=2.0.3",
+    "zensical>=0.0.43",
+]
