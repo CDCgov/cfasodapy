@@ -7,6 +7,23 @@ from urllib.parse import urlunparse
 import requests
 
 
+def _int_divide_ceiling(a: int, b: int) -> int:
+    """
+    Equivalent of a // b, but with
+    ceiling rather than floor behavior.
+
+    Follows the implementation here: https://stackoverflow.com/a/17511341
+
+    Args:
+        a (int): dividend
+        b (int): divisor
+
+    Returns:
+        int: (1 + a // b) if a is not divisible by b, otherwise (a // b)
+    """
+    return -(a // -b)
+
+
 class Query:
     def __init__(
         self,
@@ -87,11 +104,7 @@ class Query:
             Sequence of pages, each of which is a list of records
         """
 
-        starts = list(range(self._start_record, self._end_record, page_size))
-        ends = [s + 1 for s in starts[1:]] + [self._end_record]
-        assert len(starts) == len(ends)
-
-        n_pages = len(starts)
+        n_pages = _int_divide_ceiling(self.n_records, page_size)
 
         if self.verbose:
             print(
@@ -99,21 +112,32 @@ class Query:
                 f"{page_size} records each..."
             )
 
-        for i, (start, end) in enumerate(zip(starts, ends)):
-            if self.verbose:
-                print(f"  Downloading page {i + 1}/{n_pages}")
+        offset = self.offset
+        i = 1
+        page = None
 
-            page = self._get_records(start=start, end=end)
+        while page is None or len(page) == page_size:
+            page = self._get_page(offset=offset, limit=page_size)
 
-            assert (
-                len(page) == page_size
-            ), f"Expected page of size {page_size}, saw {len(page)}"
+            if len(page) > 0:
+                if self.verbose:
+                    print(f"  Downloaded page {i}/{n_pages} with {len(page)} records")
 
-            yield page
+                yield page
+                offset += page_size
+                i += 1
 
-    @functools.cached_property
-    def _n_where_records(self) -> int:
-        """Number of records in the dataset that satisfy the WHERE clause"""
+    def _get_page(self, offset: int, limit: int) -> list[dict]:
+        return self._get_request(
+            self.url,
+            params=self._build_payload(
+                select=self.select, where=self.where, offset=offset, limit=limit
+            ),
+            app_token=self.app_token,
+        )
+
+    def _get_n_where(self) -> int:
+        """Number of records that satisfy the WHERE clause"""
         result = self._get_request(
             self.url,
             params=self._build_payload(select="count(:id)", where=self.where, limit=1),
@@ -122,59 +146,29 @@ class Query:
 
         assert len(result) == 1, f"Expected length 1, got {len(result)}"
         assert "count_id" in result[0]
-        n = int(result[0]["count_id"])
+        return int(result[0]["count_id"])
 
-        if n == 0 and self.verbose:
-            warnings.warn(
-                f"Dataset {self.id} at {self.domain} has no records. "
-                "This may be due to an bad query."
-            )
+    @functools.cached_property
+    def n_records(self) -> int:
+        """Inferred number of records in the query"""
+        n_where = self._get_n_where()
 
-        return n
-
-    @property
-    def _start_record(self) -> int:
-        return min(self.offset, self._n_where_records - 1)
-
-    @property
-    def _end_record(self) -> int:
-        if self._n_where_records == 0:
+        if n_where == 0:
+            if self.verbose:
+                warnings.warn(
+                    "No records satisfy the WHERE clause. This may be due to an bad query."
+                )
+            return 0
+        elif self.offset >= n_where:
+            if self.verbose:
+                warnings.warn(
+                    "Offset is greater than number of records that satisfy WHERE clause."
+                )
             return 0
         elif self.limit is None:
-            return self._n_where_records - 1
+            return n_where - self.offset
         else:
-            return min(self._n_where_records - 1, self._start_record + self.limit - 1)
-
-    @property
-    def n_records(self) -> int:
-        """
-        The number of records in the query. If the query has zero offset, no limit, and no
-        WHERE clause, this is the number of records in the dataset.
-        """
-        return self._end_record - self._start_record
-
-    def _get_records(self, start: int, end: int) -> list[dict]:
-        """
-        Download a specific range of records that satisfy the WHERE clause
-
-        Args:
-            start: first record, zero-indexed
-            end: last record, zero-indexed
-
-        Returns:
-            records
-        """
-
-        assert start <= end
-        limit = end - start + 1
-
-        return self._get_request(
-            self.url,
-            params=self._build_payload(
-                select=self.select, where=self.where, offset=start, limit=limit
-            ),
-            app_token=self.app_token,
-        )
+            return min(n_where - self.offset, self.limit)
 
     @classmethod
     def _build_payload(
