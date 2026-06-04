@@ -1,5 +1,4 @@
 import functools
-import itertools
 import warnings
 from collections.abc import Iterator, Sequence
 from typing import Optional
@@ -88,12 +87,11 @@ class Query:
             Sequence of pages, each of which is a list of records
         """
 
-        starts = [self._start_record]
-        ends = []
-        x = self._start_record
-
         starts = list(range(self._start_record, self._end_record, page_size))
-        n_pages = len(starts) - 1
+        ends = [s + 1 for s in starts[1:]] + [self._end_record]
+        assert len(starts) == len(ends)
+
+        n_pages = len(starts)
 
         if self.verbose:
             print(
@@ -101,20 +99,16 @@ class Query:
                 f"{page_size} records each..."
             )
 
-        for i, (start, next_start) in enumerate(itertools.pairwise(starts)):
+        for i, (start, end) in enumerate(zip(starts, ends)):
             if self.verbose:
                 print(f"  Downloading page {i + 1}/{n_pages}")
 
-            page = self._get_records(start=start, end=next_start - 1)
+            page = self._get_records(start=start, end=end)
 
-            assert len(page) == page_size
+            assert (
+                len(page) == page_size
+            ), f"Expected page of size {page_size}, saw {len(page)}"
 
-            yield page
-
-        # partial, final page
-        if next_start - 1 < self._end_record:
-            page = self._get_records(start=next_start, end=self._end_record)
-            assert 0 < len(page) < page_size
             yield page
 
     @functools.cached_property

@@ -55,7 +55,7 @@ def test_start_end(monkeypatch, offset, limit, expected_start, expected_end):
 
 def test_pages(monkeypatch):
     def mock_get_records(_, start, end):
-        return list(range(start, end + 1))
+        return list(range(start, end))
 
     monkeypatch.setattr(Query, "_get_records", mock_get_records)
     monkeypatch.setattr(Query, "_n_where_records", 100)
