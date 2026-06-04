@@ -1,26 +1,11 @@
+import functools
+import itertools
 import warnings
 from collections.abc import Iterator, Sequence
 from typing import Optional
 from urllib.parse import urlunparse
 
 import requests
-
-
-def _int_divide_ceiling(a: int, b: int) -> int:
-    """
-    Equivalent of a // b, but with
-    ceiling rather than floor behavior.
-
-    Follows the implementation here: https://stackoverflow.com/a/17511341
-
-    Args:
-        a (int): dividend
-        b (int): divisor
-
-    Returns:
-        int: (1 + a // b) if a is not divisible by b, otherwise (a // b)
-    """
-    return -(a // -b)
 
 
 class Query:
@@ -67,14 +52,14 @@ class Query:
 
     def get_all(self) -> list[dict]:
         """
-        Download all records from the dataset
+        Download all records from the query
 
         Returns:
             list[dict]: list of records
         """
 
         if self.verbose:
-            print(f"Downloading dataset {self.domain} {self.id}: {self.n_rows} rows")
+            print(f"Downloading {self.n_records} records")
 
         result = self._get_request(
             self.url,
@@ -88,7 +73,7 @@ class Query:
         )
 
         if self.verbose:
-            print(f"  Downloaded {len(result)} rows")
+            print(f"  Downloaded {len(result)} records")
 
         return result
 
@@ -97,53 +82,44 @@ class Query:
         Download a dataset page by page
 
         Args:
-            page_size (int): number of records per page (default: 10,000)
+            page_size: number of records per page
 
         Yields:
             Sequence of pages, each of which is a list of records
         """
 
-        if self.limit is None:
-            row_count = self.n_rows
-        else:
-            row_count = min(self.limit, self.n_rows)
+        starts = [self._start_record]
+        ends = []
+        x = self._start_record
 
-        n_pages = _int_divide_ceiling(row_count, page_size)
+        starts = list(range(self._start_record, self._end_record, page_size))
+        n_pages = len(starts) - 1
 
         if self.verbose:
             print(
-                f"Downloading dataset {self.domain} {self.id}: "
-                f"{row_count} rows in {n_pages} page(s) of at most "
-                f"{page_size} rows each..."
+                f"Downloading {self.n_records} records in {n_pages} page(s) of "
+                f"{page_size} records each..."
             )
 
-        for i in range(n_pages):
+        for i, (start, next_start) in enumerate(itertools.pairwise(starts)):
             if self.verbose:
                 print(f"  Downloading page {i + 1}/{n_pages}")
 
-            start = self.offset + i * page_size
+            page = self._get_records(start=start, end=next_start - 1)
 
-            # on the last page, only go up to the row count
-            if i + 1 == n_pages:
-                end = self.offset + row_count - 1
-            else:
-                end = self.offset + (i + 1) * page_size - 1
-
-            page = self._get_records(start=start, end=end)
-
-            assert len(page) > 0
-            assert len(page) <= page_size
+            assert len(page) == page_size
 
             yield page
 
-    @property
-    def n_rows(self) -> int:
-        """
-        The number of rows in the query
+        # partial, final page
+        if next_start - 1 < self._end_record:
+            page = self._get_records(start=next_start, end=self._end_record)
+            assert 0 < len(page) < page_size
+            yield page
 
-        Returns:
-            int: number of rows in the dataset
-        """
+    @functools.cached_property
+    def _n_where_records(self) -> int:
+        """Number of records in the dataset that satisfy the WHERE clause"""
         result = self._get_request(
             self.url,
             params=self._build_payload(select="count(:id)", where=self.where, limit=1),
@@ -152,57 +128,56 @@ class Query:
 
         assert len(result) == 1, f"Expected length 1, got {len(result)}"
         assert "count_id" in result[0]
-        n_dataset_rows = int(result[0]["count_id"])
+        n = int(result[0]["count_id"])
 
-        if n_dataset_rows == 0:
-            if self.verbose:
-                warnings.warn(
-                    f"Dataset {self.id} at {self.domain} has no rows. "
-                    "This may be due to an bad query."
-                )
+        if n == 0 and self.verbose:
+            warnings.warn(
+                f"Dataset {self.id} at {self.domain} has no records. "
+                "This may be due to an bad query."
+            )
+
+        return n
+
+    @property
+    def _start_record(self) -> int:
+        return min(self.offset, self._n_where_records - 1)
+
+    @property
+    def _end_record(self) -> int:
+        if self._n_where_records == 0:
             return 0
-
-        n_rows_after_offset = n_dataset_rows - self.offset
-
-        if n_rows_after_offset < 0:
-            if self.verbose:
-                warnings.warn(
-                    f"Offset {self.offset} is larger than the number of rows"
-                    f" in the dataset ({n_dataset_rows})."
-                )
-            return 0
-
-        if self.limit is None or self.limit > n_rows_after_offset:
-            return n_rows_after_offset
+        elif self.limit is None:
+            return self._n_where_records - 1
         else:
-            return n_rows_after_offset - self.limit
+            return min(self._n_where_records - 1, self._start_record + self.limit - 1)
+
+    @property
+    def n_records(self) -> int:
+        """
+        The number of records in the query. If the query has zero offset, no limit, and no
+        WHERE clause, this is the number of records in the dataset.
+        """
+        return self._end_record - self._start_record
 
     def _get_records(self, start: int, end: int) -> list[dict]:
         """
-        Download a specific range of rows from a query, accounting
-        for the offset and limit.
+        Download a specific range of records that satisfy the WHERE clause
 
         Args:
-            start (int): first row (zero-indexed)
-            end (int): last row (zero-indexed)
+            start: first record, zero-indexed
+            end: last record, zero-indexed
 
         Returns:
-            list[dict]: list of records
+            records
         """
 
-        assert end >= start
-        assert (
-            self.limit is None or end < self.limit
-        ), f"End index {end} is larger than limit {self.limit}."
-        n_rows = end - start + 1
+        assert start <= end
+        limit = end - start + 1
 
         return self._get_request(
             self.url,
             params=self._build_payload(
-                select=self.select,
-                where=self.where,
-                offset=self.offset + start,
-                limit=n_rows,
+                select=self.select, where=self.where, offset=start, limit=limit
             ),
             app_token=self.app_token,
         )
