@@ -1,3 +1,4 @@
+import functools
 import json
 import urllib.error
 import warnings
@@ -7,21 +8,30 @@ from urllib.parse import urlencode, urlunparse
 from urllib.request import Request, urlopen
 
 
-def _int_divide_ceiling(a: int, b: int) -> int:
-    """
-    Equivalent of a // b, but with
-    ceiling rather than floor behavior.
+def _page_bounds(
+    offset: int, limit: int | None, page_size: int, n_where_records: int
+) -> list[tuple[int, int]]:
+    assert offset >= 0
+    assert page_size >= 1
+    assert limit is None or limit >= 0
+    assert n_where_records >= 0
 
-    Follows the implementation here: https://stackoverflow.com/a/17511341
+    # number of records to return in the absence of a limit
+    n_nolimit = max(0, n_where_records - offset)
 
-    Args:
-        a (int): dividend
-        b (int): divisor
+    if limit is None:
+        n_to_return = n_nolimit
+    else:
+        n_to_return = min(limit, n_nolimit)
 
-    Returns:
-        int: (1 + a // b) if a is not divisible by b, otherwise (a // b)
-    """
-    return -(a // -b)
+    bounds = []
+    n_returned = 0
+    while n_returned < n_to_return:
+        this_limit = min(page_size, n_to_return - n_returned)
+        bounds.append((offset + n_returned, this_limit))
+        n_returned += this_limit
+
+    return bounds
 
 
 class Query:
@@ -68,14 +78,14 @@ class Query:
 
     def get_all(self) -> list[dict]:
         """
-        Download all records from the dataset
+        Download all records from the query
 
         Returns:
             list[dict]: list of records
         """
 
         if self.verbose:
-            print(f"Downloading dataset {self.domain} {self.id}: {self.n_rows} rows")
+            print(f"Downloading {self.n_records} records")
 
         result = self._get_request(
             self.url,
@@ -89,7 +99,7 @@ class Query:
         )
 
         if self.verbose:
-            print(f"  Downloaded {len(result)} rows")
+            print(f"  Downloaded {len(result)} records")
 
         return result
 
@@ -98,43 +108,36 @@ class Query:
         Download a dataset page by page
 
         Args:
-            page_size (int): number of records per page (default: 10,000)
+            page_size: number of records per page
 
         Yields:
             Sequence of pages, each of which is a list of records
         """
-
-        row_count = self.n_rows
-        n_pages = _int_divide_ceiling(row_count, page_size)
+        bounds = _page_bounds(
+            offset=self.offset,
+            limit=self.limit,
+            page_size=page_size,
+            n_where_records=self._n_where_records,
+        )
+        n_pages = len(bounds)
 
         if self.verbose:
             print(
-                f"Downloading dataset {self.domain} {self.id}: "
-                f"{row_count} rows in {n_pages} page(s) of at most "
-                f"{page_size} rows each..."
+                f"Downloading {self.n_records} records in {n_pages} page(s) of "
+                f"{page_size} records each..."
             )
 
-        for i in range(n_pages):
+        for i, (offset, limit) in enumerate(bounds):
+            page = self._get_records(offset=offset, limit=limit)
+
             if self.verbose:
-                print(f"  Downloading page {i + 1}/{n_pages}")
-
-            start = i * page_size
-            end = (i + 1) * page_size - 1
-            page = self._get_records(start=start, end=end)
-
-            assert len(page) > 0
-            assert len(page) <= page_size
+                print(f"  Downloaded page {i + 1}/{n_pages} with {len(page)} records")
 
             yield page
 
-    @property
-    def n_rows(self) -> int:
-        """
-        The number of rows in the query
-
-        Returns:
-            int: number of rows in the dataset
-        """
+    @functools.cached_property
+    def _n_where_records(self) -> int:
+        """Number of records in the dataset that satisfy the WHERE clause"""
         result = self._get_request(
             self.url,
             params=self._build_payload(select="count(:id)", where=self.where, limit=1),
@@ -143,57 +146,43 @@ class Query:
 
         assert len(result) == 1, f"Expected length 1, got {len(result)}"
         assert "count_id" in result[0]
-        n_dataset_rows = int(result[0]["count_id"])
+        n = int(result[0]["count_id"])
 
-        if n_dataset_rows == 0:
-            if self.verbose:
-                warnings.warn(
-                    f"Dataset {self.id} at {self.domain} has no rows. "
-                    "This may be due to an bad query."
-                )
+        if n == 0 and self.verbose:
+            warnings.warn(
+                "No matching dataset records. This may be due to an bad query."
+            )
+
+        return n
+
+    @property
+    def n_records(self) -> int:
+        """
+        The number of records in the query. If the query has zero offset, no limit, and no
+        WHERE clause, this is the number of records in the dataset.
+        """
+        if self._n_where_records == 0 or self.offset > self._n_where_records:
             return 0
 
-        n_rows_after_offset = n_dataset_rows - self.offset
+        n_nolimit = self._n_where_records - self.offset
 
-        if n_rows_after_offset < 0:
-            if self.verbose:
-                warnings.warn(
-                    f"Offset {self.offset} is larger than the number of rows"
-                    f" in the dataset ({n_dataset_rows})."
-                )
-            return 0
-
-        if self.limit is None or self.limit > n_rows_after_offset:
-            return n_rows_after_offset
+        if self.limit is None:
+            return n_nolimit
         else:
-            return n_rows_after_offset - self.limit
+            return min(self.limit, n_nolimit)
 
-    def _get_records(self, start: int, end: int) -> list[dict]:
+    def _get_records(self, offset: int, limit: int) -> list[dict]:
         """
-        Download a specific range of rows from a query, accounting
-        for the offset and limit.
-
-        Args:
-            start (int): first row (zero-indexed)
-            end (int): last row (zero-indexed)
-
-        Returns:
-            list[dict]: list of records
+        Download a specific range of records that satisfy the WHERE clause
         """
 
-        assert end >= start
-        assert (
-            self.limit is None or end < self.limit
-        ), f"End index {end} is larger than limit {self.limit}."
-        n_rows = end - start + 1
+        assert offset >= 0
+        assert limit >= 0
 
         return self._get_request(
             self.url,
             params=self._build_payload(
-                select=self.select,
-                where=self.where,
-                offset=self.offset + start,
-                limit=n_rows,
+                select=self.select, where=self.where, offset=offset, limit=limit
             ),
             app_token=self.app_token,
         )
