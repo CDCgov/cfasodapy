@@ -1,6 +1,6 @@
 [project]
 name = "cfasodapy"
-version = "0.3.0"
+version = "0.4.0"
 description = "Query Socrata databases"
 readme = "README.md"
 authors = [{ name = "Scott Olesen", email = "ulp7@cdc.gov" }]
