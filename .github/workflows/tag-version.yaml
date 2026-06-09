@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: |
-          version=$(jq -r '.version // empty' package.json)
+          version=$(grep -E '^version' pyproject.toml | head -n 1 | cut -d '"' -f 2)
           if [ -z "$version" ]; then
             echo "No version in package.json, skipping"
             exit 0
