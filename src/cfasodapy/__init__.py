@@ -1,9 +1,10 @@
+import json
+import urllib.error
 import warnings
 from collections.abc import Iterator, Sequence
 from typing import Optional
-from urllib.parse import urlunparse
-
-import requests
+from urllib.parse import urlencode, urlunparse
+from urllib.request import Request, urlopen
 
 
 def _int_divide_ceiling(a: int, b: int) -> int:
@@ -247,11 +248,28 @@ class Query:
     def _get_request(
         cls, url: str, params: Optional[dict] = None, app_token: Optional[str] = None
     ) -> list[dict]:
-        if app_token is not None:
-            data = {"X-App-token": app_token}
+        if params is not None:
+            request_url = url + "?" + urlencode(params, doseq=True)
         else:
-            data = None
+            request_url = url
 
-        r = requests.get(url, data=data, params=params)
-        r.raise_for_status()
-        return r.json()
+        if app_token is not None:
+            headers = {"X-App-token": app_token}
+        else:
+            headers = {}
+
+        request = Request(request_url, headers=headers, method="GET")
+
+        try:
+            with urlopen(request) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            msg = "\n".join(
+                [
+                    f"HTTP Error {e.code} {e.reason}",
+                    f"URL: {e.url}",
+                    e.read().decode("utf-8", errors="replace"),
+                ]
+            )
+
+            raise RuntimeError(msg) from e
