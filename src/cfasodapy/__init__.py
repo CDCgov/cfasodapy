@@ -2,36 +2,12 @@ import functools
 import json
 import urllib.error
 import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from typing import Optional
-from urllib.parse import urlencode, urlunparse
+from urllib.parse import urlunparse
 from urllib.request import Request, urlopen
 
-
-def _page_bounds(
-    offset: int, limit: int | None, page_size: int, n_where_records: int
-) -> list[tuple[int, int]]:
-    assert offset >= 0
-    assert page_size >= 1
-    assert limit is None or limit >= 0
-    assert n_where_records >= 0
-
-    # number of records to return in the absence of a limit
-    n_nolimit = max(0, n_where_records - offset)
-
-    if limit is None:
-        n_to_return = n_nolimit
-    else:
-        n_to_return = min(limit, n_nolimit)
-
-    bounds = []
-    n_returned = 0
-    while n_returned < n_to_return:
-        this_limit = min(page_size, n_to_return - n_returned)
-        bounds.append((offset + n_returned, this_limit))
-        n_returned += this_limit
-
-    return bounds
+from typing_extensions import Self
 
 
 class Query:
@@ -39,29 +15,27 @@ class Query:
         self,
         domain: str,
         id: str,
+        app_token: str,
         select: Optional[str | Sequence[str]] = None,
         where: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
-        app_token: Optional[str] = None,
+        page_size: int = 10_000,
         verbose=True,
     ):
         """
-        Build a query for a Socrata dataset
+        Query a Socrata dataset
 
-        Note that $group, $having, and $order clauses are not supported.
+        Note that GROUP BY, HAVING, ORDER BY, LIMIT, and OFFSET clauses are not supported.
 
         Args:
             domain (str): base URL
             id (str): dataset ID
+            app_token (str): Socrata developer app token
             select (str or Sequence[str], optional): select clause
                 (e.g., a column name or a comma-separated list of column names)
                 or a list of strings that will be comma-joined (e.g., a list
                 of column names)
             where (str, optional): filter condition
-            limit (int, optional): maximum number of records to return
-            offset (int): number of records to skip. Default: 0.
-            app_token (str, optional): Socrata developer app token, or None
+            page_size (int, optional): page size
             verbose (bool): If True (default), print progress and warnings.
 
         Returns:
@@ -69,16 +43,21 @@ class Query:
         """
         self.domain = domain
         self.id = id
+        self.app_token = app_token
         self.select = select
         self.where = where
-        self.limit = limit
-        self.offset = offset
-        self.app_token = app_token
+        self.page_size = page_size
         self.verbose = verbose
+
+        self.page_number = 1
+        self.url = urlunparse(
+            ("https", self.domain, f"api/v3/views/{self.id}/query.json", "", "", "")
+        )
+        self.n_pages = _int_divide_ceiling(self.n_records, self.page_size)
 
     def get_all(self) -> list[dict]:
         """
-        Download all records from the query
+        Download all records from the query. This is a convenience function for `[x for page in query for x in page]`.
 
         Returns:
             list[dict]: list of records
@@ -87,61 +66,45 @@ class Query:
         if self.verbose:
             print(f"Downloading {self.n_records} records")
 
-        result = self._get_request(
-            self.url,
-            params=self._build_payload(
-                select=self.select,
-                where=self.where,
-                limit=self.limit,
-                offset=self.offset,
-            ),
-            app_token=self.app_token,
-        )
+        result = [x for page in self for x in page]
 
         if self.verbose:
             print(f"  Downloaded {len(result)} records")
 
         return result
 
-    def get_pages(self, page_size: int = 10_000) -> Iterator[list[dict]]:
-        """
-        Download a dataset page by page
+    def __iter__(self) -> Self:
+        return self
 
-        Args:
-            page_size: number of records per page
-
-        Yields:
-            Sequence of pages, each of which is a list of records
-        """
-        bounds = _page_bounds(
-            offset=self.offset,
-            limit=self.limit,
-            page_size=page_size,
-            n_where_records=self._n_where_records,
+    def __next__(self) -> list[dict]:
+        result = self._get_request(
+            self.url,
+            app_token=self.app_token,
+            query=self._build_query_string(select=self.select, where=self.where),
+            page_number=self.page_number,
+            page_size=self.page_size,
         )
-        n_pages = len(bounds)
+
+        if len(result) == 0:
+            raise StopIteration
 
         if self.verbose:
             print(
-                f"Downloading {self.n_records} records in {n_pages} page(s) of "
-                f"{page_size} records each..."
+                f"  Downloaded page {self.page_number}/{self.n_pages} with {len(result)} records"
             )
 
-        for i, (offset, limit) in enumerate(bounds):
-            page = self._get_records(offset=offset, limit=limit)
-
-            if self.verbose:
-                print(f"  Downloaded page {i + 1}/{n_pages} with {len(page)} records")
-
-            yield page
+        self.page_number += 1
+        return result
 
     @functools.cached_property
-    def _n_where_records(self) -> int:
+    def n_records(self) -> int:
         """Number of records in the dataset that satisfy the WHERE clause"""
         result = self._get_request(
             self.url,
-            params=self._build_payload(select="count(:id)", where=self.where, limit=1),
             app_token=self.app_token,
+            query=self._build_query_string(select="count(:id)", where=self.where),
+            page_number=1,
+            page_size=10,
         )
 
         assert len(result) == 1, f"Expected length 1, got {len(result)}"
@@ -155,99 +118,40 @@ class Query:
 
         return n
 
-    @property
-    def n_records(self) -> int:
+    @staticmethod
+    def _build_query_string(
+        select: Optional[str | Sequence[str]] = None, where: Optional[str] = None
+    ) -> str:
         """
-        The number of records in the query. If the query has zero offset, no limit, and no
-        WHERE clause, this is the number of records in the dataset.
+        Build the query string for the request
         """
-        if self._n_where_records == 0 or self.offset > self._n_where_records:
-            return 0
-
-        n_nolimit = self._n_where_records - self.offset
-
-        if self.limit is None:
-            return n_nolimit
-        else:
-            return min(self.limit, n_nolimit)
-
-    def _get_records(self, offset: int, limit: int) -> list[dict]:
-        """
-        Download a specific range of records that satisfy the WHERE clause
-        """
-
-        assert offset >= 0
-        assert limit >= 0
-
-        return self._get_request(
-            self.url,
-            params=self._build_payload(
-                select=self.select, where=self.where, offset=offset, limit=limit
-            ),
-            app_token=self.app_token,
-        )
-
-    @classmethod
-    def _build_payload(
-        cls,
-        select: Optional[str | Sequence[str]] = None,
-        where: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: int = 0,
-    ) -> dict:
-        """
-        Build the payload for the request
-        """
-        clauses = {}
-
+        s = "SELECT "
         if select is None:
-            pass
+            s += "*"
         elif isinstance(select, str):
-            clauses["$select"] = select
+            s += select
         else:
-            clauses["$select"] = ",".join(select)
+            s += ",".join([f"`{x}`" for x in select])
 
         if where is not None:
-            clauses["$where"] = where
+            s += " WHERE " + where
 
-        if limit is not None:
-            assert isinstance(limit, int)
-            assert limit > 0
-            clauses["$limit"] = limit
-
-        assert isinstance(offset, int)
-        assert offset >= 0
-        clauses["$offset"] = offset
-
-        return clauses
-
-    @property
-    def url(self) -> str:
-        """
-        Socrata API base URL for the query
-
-        Returns:
-            str: URL
-        """
-        return urlunparse(
-            ("https", self.domain, f"resource/{self.id}.json", "", "", "")
-        )
+        return s
 
     @classmethod
     def _get_request(
-        cls, url: str, params: Optional[dict] = None, app_token: Optional[str] = None
+        cls, url: str, app_token: str, query: str, page_number: int, page_size: int
     ) -> list[dict]:
-        if params is not None:
-            request_url = url + "?" + urlencode(params, doseq=True)
-        else:
-            request_url = url
+        # query, etc. are called "request options" <https://dev.socrata.com/docs/queries/>
+        options = {
+            "query": query,
+            "page": {"pageNumber": page_number, "pageSize": page_size},
+            "includeSynthetic": False,
+        }
 
-        if app_token is not None:
-            headers = {"X-App-token": app_token}
-        else:
-            headers = {}
-
-        request = Request(request_url, headers=headers, method="GET")
+        data = json.dumps(options).encode("utf-8")
+        headers = {"X-App-token": app_token, "Content-Type": "application/json"}
+        request = Request(url, data=data, headers=headers, method="POST")
 
         try:
             with urlopen(request) as response:
@@ -262,3 +166,20 @@ class Query:
             )
 
             raise RuntimeError(msg) from e
+
+
+def _int_divide_ceiling(a: int, b: int) -> int:
+    """
+    Equivalent of a // b, but with
+    ceiling rather than floor behavior.
+
+    Follows the implementation here: https://stackoverflow.com/a/17511341
+
+    Args:
+        a (int): dividend
+        b (int): divisor
+
+    Returns:
+        int: (1 + a // b) if a is not divisible by b, otherwise (a // b)
+    """
+    return -(a // -b)

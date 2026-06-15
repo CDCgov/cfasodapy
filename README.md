@@ -2,7 +2,7 @@
 
 ## Overview
 
-A [sodapy](https://pypi.org/project/sodapy/) successor designed for paginated queries.
+A [sodapy](https://pypi.org/project/sodapy/) successor designed for paginated queries with a minimalist philosophy.
 
 ## Getting started
 
@@ -12,7 +12,7 @@ A [sodapy](https://pypi.org/project/sodapy/) successor designed for paginated qu
 q = Query(domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN)
 ```
 
-You can also limit your query using [Socrata query clauses](https://dev.socrata.com/docs/queries/):
+You can refine your query using [SoQL clauses](https://dev.socrata.com/docs/queries/query):
 
 ```python
 q = Query(
@@ -24,14 +24,8 @@ q = Query(
 Having constructed the query, access the data page by page. Each page is a list of records:
 
 ```python
-for page in q.get_pages():
+for page in q:
     print(page)
-```
-
-It is possible to attempt to get all the records at once, but note that these queries might time out or require an explicit `$limit` clause:
-
-```python
-print(q.get_all())
 ```
 
 ## Project admins
