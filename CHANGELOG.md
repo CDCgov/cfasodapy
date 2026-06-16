@@ -19,4 +19,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Removed
 
-- **Breaking**: Support for LIMIT and OFFSET clauses
+- **Breaking**: Support for LIMIT and OFFSET clauses. (The API docs [do not recommend](https://dev.socrata.com/docs/queries/query) use of these clauses.)
