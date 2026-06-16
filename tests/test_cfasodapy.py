@@ -17,13 +17,6 @@ def test_build_query_string(select, where, expected):
     assert Query._build_query_string(select=select, where=where) == expected
 
 
-def test_build_query_select_list():
-    select = ["field1", "field2"]
-    expected_query = "SELECT `field1`,`field2`"
-
-    assert Query._build_query_string(select=select) == expected_query
-
-
 @pytest.fixture
 def mock_query(monkeypatch):
     n_records = 17
