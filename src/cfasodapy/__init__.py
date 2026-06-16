@@ -48,8 +48,6 @@ class Query:
         self.page_size = page_size
         self.verbose = verbose
 
-        self.n_pages = _int_divide_ceiling(self.n_records, self.page_size)
-
     def get_all(self) -> list[dict]:
         """
         Download all records from the query. This is a convenience function for `[x for page in query for x in page]`.
@@ -69,6 +67,8 @@ class Query:
         return result
 
     def __iter__(self) -> Iterator[list[dict]]:
+        n_pages = _int_divide_ceiling(self.n_records, self.page_size)
+
         for page_number in itertools.count(start=1):
             result = self._get_request(
                 self.url,
@@ -83,7 +83,7 @@ class Query:
 
             if self.verbose:
                 print(
-                    f"  Downloaded page {page_number}/{self.n_pages} with {len(result)} records"
+                    f"  Downloaded page {page_number}/{n_pages} with {len(result)} records"
                 )
 
             yield result
