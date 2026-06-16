@@ -1,13 +1,12 @@
 import functools
+import itertools
 import json
 import urllib.error
 import warnings
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Optional
 from urllib.parse import urlunparse
 from urllib.request import Request, urlopen
-
-from typing_extensions import Self
 
 
 class Query:
@@ -49,10 +48,6 @@ class Query:
         self.page_size = page_size
         self.verbose = verbose
 
-        self.page_number = 1
-        self.url = urlunparse(
-            ("https", self.domain, f"api/v3/views/{self.id}/query.json", "", "", "")
-        )
         self.n_pages = _int_divide_ceiling(self.n_records, self.page_size)
 
     def get_all(self) -> list[dict]:
@@ -73,28 +68,31 @@ class Query:
 
         return result
 
-    def __iter__(self) -> Self:
-        return self
-
-    def __next__(self) -> list[dict]:
-        result = self._get_request(
-            self.url,
-            app_token=self.app_token,
-            query=self._build_query_string(select=self.select, where=self.where),
-            page_number=self.page_number,
-            page_size=self.page_size,
-        )
-
-        if len(result) == 0:
-            raise StopIteration
-
-        if self.verbose:
-            print(
-                f"  Downloaded page {self.page_number}/{self.n_pages} with {len(result)} records"
+    def __iter__(self) -> Iterator[list[dict]]:
+        for page_number in itertools.count(start=1):
+            result = self._get_request(
+                self.url,
+                app_token=self.app_token,
+                query=self._build_query_string(select=self.select, where=self.where),
+                page_number=page_number,
+                page_size=self.page_size,
             )
 
-        self.page_number += 1
-        return result
+            if len(result) == 0:
+                break
+
+            if self.verbose:
+                print(
+                    f"  Downloaded page {page_number}/{self.n_pages} with {len(result)} records"
+                )
+
+            yield result
+
+    @property
+    def url(self) -> str:
+        return urlunparse(
+            ("https", self.domain, f"api/v3/views/{self.id}/query.json", "", "", "")
+        )
 
     @functools.cached_property
     def n_records(self) -> int:
