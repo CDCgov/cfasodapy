@@ -32,8 +32,8 @@ class Query:
             app_token (str): Socrata developer app token
             select (str or Sequence[str], optional): select clause
                 (e.g., a column name or a comma-separated list of column names)
-                or a list of strings that will be comma-joined (e.g., a list
-                of column names)
+                or a list of strings that will be backtick-quoted and comma-joined
+                (e.g., a list of column names)
             where (str, optional): filter condition
             page_size (int, optional): page size
             verbose (bool): If True (default), print progress and warnings.
