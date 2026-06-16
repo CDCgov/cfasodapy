@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **Breaking**: Rather than a `Query` object, the entrypoints are the functions `get_pages()` and `get_all()`
+
 ## 0.5.0 - 2026-06-15
 
 ### Added

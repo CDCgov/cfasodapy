@@ -1,61 +1,72 @@
 import pytest
 
-from cfasodapy import Query
+import cfasodapy
+
+
+def test_build_url():
+    assert (
+        cfasodapy._build_url(domain="data.cdc.gov", id="abcd-1234")
+        == "https://data.cdc.gov/api/v3/views/abcd-1234/query.json"
+    )
 
 
 @pytest.mark.parametrize(
     ["select", "where", "expected"],
     [
+        # no explicit select produces *
         (None, None, "SELECT *"),
+        # if it's a string, just plop it in wholesale
         ("whatever I say", None, "SELECT whatever I say"),
+        # list of strings get backtick-quoted & command-joined
         (["field1", "field2"], None, "SELECT `field1`,`field2`"),
+        # where clause but not select clause
         (None, '`foo`="bar"', 'SELECT * WHERE `foo`="bar"'),
+        # both select and where
         ("field1", '`foo`="bar"', 'SELECT field1 WHERE `foo`="bar"'),
     ],
 )
-def test_build_query_string(select, where, expected):
-    assert Query._build_query_string(select=select, where=where) == expected
+def test_build_query(select, where, expected):
+    assert cfasodapy._build_query(select=select, where=where) == expected
 
 
-@pytest.fixture
-def mock_query(monkeypatch):
+class TestGet:
     n_records = 17
     page_size = 5
 
-    def mock_get_request(
-        cls, url: str, app_token: str, query: str, page_number: int, page_size: int
-    ):
-        start = page_size * (page_number - 1) + 1
-        end = page_size * page_number
+    kwargs = {
+        "domain": "data.cdc.gov",
+        "id": "abcd-1234",
+        "app_token": "mytoken",
+        "page_size": page_size,
+        "verbose": False,
+    }
 
-        if start > n_records:
-            return []
-        else:
-            return list(range(start, min(end, n_records) + 1))
+    @pytest.fixture
+    def mock_request(self, monkeypatch):
+        def mock_get_n_records(*args, **kwargs):
+            return self.n_records
 
-    monkeypatch.setattr(Query, "n_records", n_records)
-    monkeypatch.setattr(Query, "_get_request", mock_get_request)
-    return Query(
-        domain="data.cdc.gov",
-        id="abcd-1234",
-        app_token="mytoken",
-        page_size=page_size,
-        verbose=False,
-    )
+        def mock_get_request(url, app_token, query, page_number, page_size):
+            start = page_size * (page_number - 1) + 1
+            end = page_size * page_number
 
+            if start > self.n_records:
+                return []
+            else:
+                return list(range(start, min(end, self.n_records) + 1))
 
-def test_build_url(mock_query):
-    assert mock_query.url == "https://data.cdc.gov/api/v3/views/abcd-1234/query.json"
+        monkeypatch.setattr(cfasodapy, "_get_n_records", mock_get_n_records)
+        monkeypatch.setattr(cfasodapy, "_get_request", mock_get_request)
 
+    def test_get_pages(self, mock_request):
+        pages_iter = cfasodapy.get_pages(**self.kwargs)
+        pages = list(pages_iter)
 
-def test_paging(mock_query):
-    pages = list(mock_query)
-    assert len(pages) == 4
-    assert [len(page) for page in pages] == [5, 5, 5, 2]
-    assert [page[0] for page in pages] == [1, 6, 11, 16]
-    assert [page[-1] for page in pages] == [5, 10, 15, 17]
+        assert len(pages) == 4
+        assert [len(page) for page in pages] == [5, 5, 5, 2]
+        assert [page[0] for page in pages] == [1, 6, 11, 16]
+        assert [page[-1] for page in pages] == [5, 10, 15, 17]
 
-
-def test_get_all(mock_query):
-    result = mock_query.get_all()
-    assert result == list(range(1, 17 + 1))
+    def test_get_all(self, mock_request):
+        result = cfasodapy.get_all(**self.kwargs)
+        assert result == list(range(1, 17 + 1))
