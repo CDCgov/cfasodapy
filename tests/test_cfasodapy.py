@@ -1,101 +1,61 @@
 import pytest
 
-from cfasodapy import Query, _page_bounds
-
-
-def test_build_url():
-    """
-    Test the _build_url method of the Query class.
-    """
-    domain = "data.cdc.gov"
-    id = "abc123"
-    expected_url = f"https://{domain}/resource/{id}.json"
-
-    assert Query(domain=domain, id=id).url == expected_url
-
-
-def test_build_payload_select_string():
-    select = "field1"
-    expected_payload = {"$select": "field1", "$offset": 0}
-
-    assert Query._build_payload(select=select) == expected_payload
-
-
-def test_build_payload_select_list():
-    select = ["field1", "field2"]
-    expected_payload = {"$select": "field1,field2", "$offset": 0}
-
-    assert Query._build_payload(select=select) == expected_payload
+from cfasodapy import Query
 
 
 @pytest.mark.parametrize(
-    ["n_where_records", "offset", "limit", "expected"],
+    ["select", "where", "expected"],
     [
-        # page size is 5 in all test
-        # 10 records, 0 offset, no limit => 2 pages
-        (10, 0, None, [(0, 5), (5, 5)]),
-        # 1 offset is still 2 pages, but second page is shorter
-        (10, 1, None, [(1, 5), (6, 4)]),
-        # 1 offset, but not hitting the limit, means two pages
-        (100, 1, 10, [(1, 5), (6, 5)]),
-        # offset of 1 means 2 pages, one shorter
-        (10, 1, None, [(1, 5), (6, 4)]),
-        # no offset, limit of 5 means one page
-        (10, 0, 5, [(0, 5)]),
-        # or, can have an even shorter page
-        (10, 0, 3, [(0, 3)]),
-        # offset beyond length of dataset gives no pages
-        (10, 15, None, []),
+        (None, None, "SELECT *"),
+        ("whatever I say", None, "SELECT whatever I say"),
+        (["field1", "field2"], None, "SELECT `field1`,`field2`"),
+        (None, '`foo`="bar"', 'SELECT * WHERE `foo`="bar"'),
+        ("field1", '`foo`="bar"', 'SELECT field1 WHERE `foo`="bar"'),
     ],
 )
-def test_page_bounds(n_where_records, offset, limit, expected):
+def test_build_query_string(select, where, expected):
+    assert Query._build_query_string(select=select, where=where) == expected
+
+
+@pytest.fixture
+def mock_query(monkeypatch):
+    n_records = 17
     page_size = 5
-    assert (
-        _page_bounds(
-            offset=offset,
-            limit=limit,
-            page_size=page_size,
-            n_where_records=n_where_records,
-        )
-        == expected
+
+    def mock_get_request(
+        cls, url: str, app_token: str, query: str, page_number: int, page_size: int
+    ):
+        start = page_size * (page_number - 1) + 1
+        end = page_size * page_number
+
+        if start > n_records:
+            return []
+        else:
+            return list(range(start, min(end, n_records) + 1))
+
+    monkeypatch.setattr(Query, "n_records", n_records)
+    monkeypatch.setattr(Query, "_get_request", mock_get_request)
+    return Query(
+        domain="data.cdc.gov",
+        id="abcd-1234",
+        app_token="mytoken",
+        page_size=page_size,
+        verbose=False,
     )
 
 
-@pytest.mark.parametrize(
-    ["offset", "limit", "expected"],
-    [
-        # zero offset, no limit => all 10 records
-        (0, None, 10),
-        # 5 offset => 5 records
-        (5, None, 5),
-        # limit of 5 => 5 records
-        (0, 5, 5),
-        # big offset => no records
-        (20, None, 0),
-        # limit and offset, no interaction
-        (5, 3, 3),
-        # limit and offset with interaction
-        (8, 10, 2),
-    ],
-)
-def test_n_records(monkeypatch, offset, limit, expected):
-    n_where = 10
-    monkeypatch.setattr(Query, "_n_where_records", n_where)
-
-    q = Query(domain="data.cdc.gov", id="abc123", offset=offset, limit=limit)
-    assert q.n_records == expected
+def test_build_url(mock_query):
+    assert mock_query.url == "https://data.cdc.gov/api/v3/views/abcd-1234/query.json"
 
 
-def test_pages(monkeypatch):
-    n_where = 10
+def test_paging(mock_query):
+    pages = list(mock_query)
+    assert len(pages) == 4
+    assert [len(page) for page in pages] == [5, 5, 5, 2]
+    assert [page[0] for page in pages] == [1, 6, 11, 16]
+    assert [page[-1] for page in pages] == [5, 10, 15, 17]
 
-    def mock_get_records(_, offset, limit):
-        return list(range(offset, offset + limit))
 
-    monkeypatch.setattr(Query, "_get_records", mock_get_records)
-    monkeypatch.setattr(Query, "_n_where_records", n_where)
-
-    q = Query(domain="data.cdc.gov", id="abc123", offset=0, limit=None)
-    pages = list(q.get_pages(page_size=5))
-    assert len(pages) == 2
-    assert pages == [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+def test_get_all(mock_query):
+    result = mock_query.get_all()
+    assert result == list(range(1, 17 + 1))
