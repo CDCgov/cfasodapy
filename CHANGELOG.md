@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 - Use SODA version 3.0
 - **Breaking**: App tokens are now required, as per SODA 3.0
-- `Query` is by default an iterator, used like `for page in my_query`
+- `Query` is by default an iterable, used like `for page in my_query`
 - `Query.get_all()` is now a convience wrapper that accumulates pages
 
 ### Removed
