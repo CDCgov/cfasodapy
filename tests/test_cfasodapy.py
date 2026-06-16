@@ -3,20 +3,6 @@ import pytest
 from cfasodapy import Query
 
 
-def test_build_url(monkeypatch):
-    """
-    Test the _build_url method of the Query class.
-    """
-
-    monkeypatch.setattr(Query, "n_records", 100)
-
-    domain = "data.cdc.gov"
-    id = "abcd-1234"
-    expected_url = "https://data.cdc.gov/api/v3/views/abcd-1234/query.json"
-
-    assert Query(domain=domain, id=id, app_token="mytoken").url == expected_url
-
-
 @pytest.mark.parametrize(
     ["select", "where", "expected"],
     [
@@ -63,6 +49,10 @@ def mock_query(monkeypatch):
         page_size=page_size,
         verbose=False,
     )
+
+
+def test_build_url(mock_query):
+    assert mock_query.url == "https://data.cdc.gov/api/v3/views/abcd-1234/query.json"
 
 
 def test_paging(mock_query):
