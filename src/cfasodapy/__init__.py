@@ -67,7 +67,15 @@ def get_pages(
         yield result
 
 
-def get_all(*args, **kwargs) -> list[dict]:
+def get_all(
+    domain: str,
+    id: str,
+    app_token: str,
+    select: Optional[str | Sequence[str]] = None,
+    where: Optional[str] = None,
+    page_size: int = 10_000,
+    verbose=True,
+) -> list[dict]:
     """
     Download all records from the query. This is a convenience function for
     `[x for page in get_pages(...) for x in page]`.
@@ -76,7 +84,15 @@ def get_all(*args, **kwargs) -> list[dict]:
         list[dict]: list of records
     """
 
-    pages = get_pages(*args, **kwargs)
+    pages = get_pages(
+        domain=domain,
+        id=id,
+        app_token=app_token,
+        select=select,
+        where=where,
+        page_size=page_size,
+        verbose=verbose,
+    )
     result = [x for page in pages for x in page]
     return result
 
