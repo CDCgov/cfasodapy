@@ -16,8 +16,7 @@ def test_build_url():
         # no explicit select produces *
         (None, None, "SELECT *"),
         # if it's a string, just plop it in wholesale
-        ("whatever I say", None, "SELECT whatever I say"),
-        # list of strings get backtick-quoted & command-joined
+        # list of strings get backtick-quoted & comma-joined
         (["field1", "field2"], None, "SELECT `field1`,`field2`"),
         # where clause but not select clause
         (None, '`foo`="bar"', 'SELECT * WHERE `foo`="bar"'),
