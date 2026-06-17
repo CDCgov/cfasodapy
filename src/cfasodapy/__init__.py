@@ -48,7 +48,7 @@ def get_pages(
         print(f"Downloading {n_records} records")
 
     for page_number in itertools.count(start=1):
-        result = _get_request(
+        result = _get_page(
             url=url,
             app_token=app_token,
             query=query,
@@ -87,8 +87,8 @@ def _build_url(domain: str, id: str) -> str:
 
 
 def _get_n_records(url: str, app_token: str, where: str | None, verbose: bool) -> int:
-    """Number of records in the dataset that satisfy the WHERE clause"""
-    result = _get_request(
+    """Get the number of records in the dataset that satisfy the WHERE clause"""
+    result = _get_page(
         url=url,
         app_token=app_token,
         query=_build_query(select="count(:id)", where=where),
@@ -110,7 +110,7 @@ def _build_query(
     select: Optional[str | Sequence[str]] = None, where: Optional[str] = None
 ) -> str:
     """
-    Build the query string for the request
+    Build the SoQL query string
     """
     s = "SELECT "
     if select is None:
@@ -126,9 +126,10 @@ def _build_query(
     return s
 
 
-def _get_request(
+def _get_page(
     url: str, app_token: str, query: str, page_number: int, page_size: int
 ) -> list[dict]:
+    """Get data from a single page"""
     # query, etc. are called "request options" <https://dev.socrata.com/docs/queries/>
     options = {
         "query": query,

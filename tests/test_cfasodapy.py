@@ -46,7 +46,7 @@ class TestGet:
         def mock_get_n_records(*args, **kwargs):
             return self.n_records
 
-        def mock_get_request(url, app_token, query, page_number, page_size):
+        def mock_get_page(url, app_token, query, page_number, page_size):
             start = page_size * (page_number - 1) + 1
             end = page_size * page_number
 
@@ -56,7 +56,7 @@ class TestGet:
                 return list(range(start, min(end, self.n_records) + 1))
 
         monkeypatch.setattr(cfasodapy, "_get_n_records", mock_get_n_records)
-        monkeypatch.setattr(cfasodapy, "_get_request", mock_get_request)
+        monkeypatch.setattr(cfasodapy, "_get_page", mock_get_page)
 
     def test_get_pages(self, mock_request):
         pages_iter = cfasodapy.get_pages(**self.kwargs)
