@@ -117,8 +117,7 @@ def _get_n_records(url: str, app_token: str, where: str | None, verbose: bool) -
     n = int(result[0]["count_id"])
 
     if n == 0 and verbose:
-        warnings.warn("No matching dataset records. This may be due to an bad query.")
-
+        warnings.warn("No matching dataset records. This may be due to a bad query.")
     return n
 
 
