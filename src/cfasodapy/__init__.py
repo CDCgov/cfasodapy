@@ -4,7 +4,7 @@ import json
 import urllib.error
 import warnings
 from collections.abc import Iterator, Sequence
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlunparse
 from urllib.request import Request, urlopen
 
@@ -70,7 +70,7 @@ class Query:
         n_pages = _int_divide_ceiling(self.n_records, self.page_size)
 
         for page_number in itertools.count(start=1):
-            result = self._get_request(
+            result = self._get_page(
                 self.url,
                 app_token=self.app_token,
                 query=self._build_query_string(select=self.select, where=self.where),
@@ -88,6 +88,11 @@ class Query:
 
             yield result
 
+    def get_column_types(self):
+        url = f"https://{self.domain}/api/views/{self.id}.json"
+        r = self._get_request(url=url, app_token=self.app_token, method="GET")
+        return [(x["fieldName"], x["dataTypeName"]) for x in r["columns"]]
+
     @property
     def url(self) -> str:
         return urlunparse(
@@ -97,7 +102,7 @@ class Query:
     @functools.cached_property
     def n_records(self) -> int:
         """Number of records in the dataset that satisfy the WHERE clause"""
-        result = self._get_request(
+        result = self._get_page(
             self.url,
             app_token=self.app_token,
             query=self._build_query_string(select="count(:id)", where=self.where),
@@ -137,7 +142,7 @@ class Query:
         return s
 
     @classmethod
-    def _get_request(
+    def _get_page(
         cls, url: str, app_token: str, query: str, page_number: int, page_size: int
     ) -> list[dict]:
         # query, etc. are called "request options" <https://dev.socrata.com/docs/queries/>
@@ -147,9 +152,21 @@ class Query:
             "includeSynthetic": False,
         }
 
-        data = json.dumps(options).encode("utf-8")
+        return cls._get_request(
+            url=url, app_token=app_token, payload=options, method="POST"
+        )
+
+    @classmethod
+    def _get_request(
+        cls, url: str, app_token: str, method: str, payload: dict | None = None
+    ) -> Any:
+        if payload is None:
+            data = None
+        else:
+            data = json.dumps(payload).encode("utf-8")
+
         headers = {"X-App-token": app_token, "Content-Type": "application/json"}
-        request = Request(url, data=data, headers=headers, method="POST")
+        request = Request(url, data=data, headers=headers, method=method)
 
         try:
             with urlopen(request) as response:
