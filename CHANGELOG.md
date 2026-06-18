@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `Query.get_column_types()` returns column names and types.
+
+### Changed
+
+- `Query` is a dataclass.
+- Private methods were refactored and moved between the class and module namespace.
+
 ## 0.5.0 - 2026-06-15
 
 ### Added
