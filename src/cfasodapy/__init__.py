@@ -36,9 +36,6 @@ class Query:
             where (str, optional): filter condition
             page_size (int, optional): page size
             verbose (bool): If True (default), print progress and warnings.
-
-        Returns:
-            Query
         """
         self.domain = domain
         self.id = id
@@ -90,13 +87,19 @@ class Query:
 
     @property
     def url(self) -> str:
+        """Query URL"""
         return urlunparse(
             ("https", self.domain, f"api/v3/views/{self.id}/query.json", "", "", "")
         )
 
     @functools.cached_property
     def n_records(self) -> int:
-        """Number of records in the dataset that satisfy the WHERE clause"""
+        """
+        Number of records in the dataset that satisfy the WHERE clause.
+
+        This value is cached and may not reflect updates to the Query's domain, ID,
+        or WHERE clause.
+        """
         result = self._get_page(
             self.url,
             app_token=self.app_token,
@@ -119,6 +122,12 @@ class Query:
     @functools.cached_property
     def column_types(self) -> list[tuple[str, str]]:
         """
+        Column names and types. Note that the column types are reported as they are
+        annotated in the dataset. They are not parsed or validated programmatically
+        by `cfasodapy`, and they may not be accurate.
+
+        This value is cached and will not reflect updates to the Query's domain or ID.
+
         Returns:
             list of (field name, data type) pairs
         """
