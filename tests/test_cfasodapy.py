@@ -22,7 +22,7 @@ def mock_query(monkeypatch):
     n_records = 17
     page_size = 5
 
-    def mock_get_request(
+    def mock_get_page(
         cls, url: str, app_token: str, query: str, page_number: int, page_size: int
     ):
         start = page_size * (page_number - 1) + 1
@@ -34,7 +34,7 @@ def mock_query(monkeypatch):
             return list(range(start, min(end, n_records) + 1))
 
     monkeypatch.setattr(Query, "n_records", n_records)
-    monkeypatch.setattr(Query, "_get_request", mock_get_request)
+    monkeypatch.setattr(Query, "_get_page", mock_get_page)
     return Query(
         domain="data.cdc.gov",
         id="abcd-1234",
