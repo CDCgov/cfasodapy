@@ -23,7 +23,13 @@ def mock_query(monkeypatch):
     page_size = 5
 
     def mock_get_page(
-        cls, url: str, app_token: str, query: str, page_number: int, page_size: int
+        cls,
+        domain: str,
+        id: str,
+        app_token: str,
+        query: str,
+        page_number: int,
+        page_size: int,
     ):
         start = page_size * (page_number - 1) + 1
         end = page_size * page_number
@@ -42,10 +48,6 @@ def mock_query(monkeypatch):
         page_size=page_size,
         verbose=False,
     )
-
-
-def test_build_url(mock_query):
-    assert mock_query.url == "https://data.cdc.gov/api/v3/views/abcd-1234/query.json"
 
 
 def test_paging(mock_query):

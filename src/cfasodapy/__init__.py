@@ -68,7 +68,8 @@ class Query:
 
         for page_number in itertools.count(start=1):
             result = self._get_page(
-                self.url,
+                domain=self.domain,
+                id=self.id,
                 app_token=self.app_token,
                 query=self._build_query_string(select=self.select, where=self.where),
                 page_number=page_number,
@@ -85,13 +86,6 @@ class Query:
 
             yield result
 
-    @property
-    def url(self) -> str:
-        """Query URL"""
-        return urlunparse(
-            ("https", self.domain, f"api/v3/views/{self.id}/query.json", "", "", "")
-        )
-
     @functools.cached_property
     def n_records(self) -> int:
         """
@@ -101,7 +95,8 @@ class Query:
         or WHERE clause.
         """
         result = self._get_page(
-            self.url,
+            domain=self.domain,
+            id=self.id,
             app_token=self.app_token,
             query=self._build_query_string(select="count(:id)", where=self.where),
             page_number=1,
@@ -131,7 +126,10 @@ class Query:
         Returns:
             list of (field name, data type) pairs
         """
-        url = f"https://{self.domain}/api/views/{self.id}.json"
+
+        url = urlunparse(
+            ("https", self.domain, f"api/views/{self.id}.json", "", "", "")
+        )
         r = self._get_request(url=url, app_token=self.app_token, method="GET")
         return [(x["fieldName"], x["dataTypeName"]) for x in r["columns"]]
 
@@ -157,8 +155,16 @@ class Query:
 
     @classmethod
     def _get_page(
-        cls, url: str, app_token: str, query: str, page_number: int, page_size: int
+        cls,
+        domain: str,
+        id: str,
+        app_token: str,
+        query: str,
+        page_number: int,
+        page_size: int,
     ) -> list[dict]:
+        url = urlunparse(("https", domain, f"api/v3/views/{id}/query.json", "", "", ""))
+
         # query, etc. are called "request options" <https://dev.socrata.com/docs/queries/>
         options = {
             "query": query,
