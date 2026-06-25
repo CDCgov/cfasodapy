@@ -127,9 +127,7 @@ class Query:
             list of (field name, data type) pairs
         """
 
-        url = urlunparse(
-            ("https", self.domain, f"api/views/{self.id}.json", "", "", "")
-        )
+        url = self._build_url(self.domain, f"api/views/{self.id}.json")
         r = self._get_request(url=url, app_token=self.app_token, method="GET")
         return [(x["fieldName"], x["dataTypeName"]) for x in r["columns"]]
 
@@ -153,6 +151,10 @@ class Query:
 
         return s
 
+    @staticmethod
+    def _build_url(domain: str, path: str) -> str:
+        return urlunparse(("https", domain, path, "", "", ""))
+
     @classmethod
     def _get_page(
         cls,
@@ -163,7 +165,7 @@ class Query:
         page_number: int,
         page_size: int,
     ) -> list[dict]:
-        url = urlunparse(("https", domain, f"api/v3/views/{id}/query.json", "", "", ""))
+        url = cls._build_url(domain, f"api/v3/views/{id}/query.json")
 
         # query, etc. are called "request options" <https://dev.socrata.com/docs/queries/>
         options = {

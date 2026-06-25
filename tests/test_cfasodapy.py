@@ -3,6 +3,13 @@ import pytest
 from cfasodapy import Query
 
 
+def test_build_url():
+    assert (
+        Query._build_url("data.cdc.gov", "path/to/query.json")
+        == "https://data.cdc.gov/path/to/query.json"
+    )
+
+
 @pytest.mark.parametrize(
     ["select", "where", "expected"],
     [
