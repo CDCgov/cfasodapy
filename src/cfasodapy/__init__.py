@@ -92,12 +92,7 @@ def get_all(
 def _get_n_records(
     domain: str, id: str, app_token: str, where: str | None = None, verbose: bool = True
 ) -> int:
-    """
-    Number of records in the dataset that satisfy the WHERE clause.
-
-    This value is cached and may not reflect updates to the Query's domain, ID,
-    or WHERE clause.
-    """
+    """Number of records in the dataset that satisfy the WHERE clause."""
     result = _get_page(
         domain=domain,
         id=id,
@@ -112,7 +107,9 @@ def _get_n_records(
     try:
         n = int(result[0]["count_id"])
     except (KeyError, TypeError, ValueError) as e:
-        raise RuntimeError("Malformed count response: expected key 'count_id' with an integer value") from e
+        raise RuntimeError(
+            "Malformed count response: expected key 'count_id' with an integer value"
+        ) from e
 
     if n == 0 and verbose:
         warnings.warn("No matching dataset records. This may be due to a bad query.")
