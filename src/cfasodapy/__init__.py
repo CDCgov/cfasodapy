@@ -33,11 +33,13 @@ def get_pages(
 
     Returns: iterator over pages
     """
+    if page_size <= 0:
+        raise ValueError("page_size must be a positive integer")
+
     n_records = _get_n_records(
         domain=domain, id=id, app_token=app_token, where=where, verbose=verbose
     )
     n_pages = _int_divide_ceiling(n_records, page_size)
-
     for page_number in itertools.count(start=1):
         result = _get_page(
             domain=domain,
@@ -105,13 +107,15 @@ def _get_n_records(
         page_size=10,
     )
 
-    assert len(result) == 1, f"Expected length 1, got {len(result)}"
-    assert "count_id" in result[0]
-    n = int(result[0]["count_id"])
+    if len(result) != 1:
+        raise RuntimeError(f"Expected 1 count result, got {len(result)}")
+    try:
+        n = int(result[0]["count_id"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise RuntimeError("Malformed count response: expected key 'count_id' with an integer value") from e
 
     if n == 0 and verbose:
-        warnings.warn("No matching dataset records. This may be due to an bad query.")
-
+        warnings.warn("No matching dataset records. This may be due to a bad query.")
     return n
 
 
@@ -120,8 +124,6 @@ def get_column_types(domain: str, id: str, app_token: str) -> list[tuple[str, st
     Column names and types. Note that the column types are reported as they are
     annotated in the dataset. They are not parsed or validated programmatically
     by `cfasodapy`, and they may not be accurate.
-
-    This value is cached and will not reflect updates to the Query's domain or ID.
 
     Returns:
         list of (field name, data type) pairs
