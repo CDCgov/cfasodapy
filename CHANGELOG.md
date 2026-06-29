@@ -8,7 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
-- `Query.column_types` returns the dataset's column names and types
+- `get_column_types()` returns the dataset's column names and types
+
+### Changed
+
+- **Breaking**: `Query` was removed in favor of `get_pages()` and `get_all()` functions
 
 ## 0.5.0 - 2026-06-15
 

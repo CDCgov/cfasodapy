@@ -6,27 +6,28 @@ A [sodapy](https://pypi.org/project/sodapy/) successor designed for paginated qu
 
 ## Getting started
 
-`cfasodapy` interacts with Socrata datasets via a query object. For example, to query [this CDC dataset](https://data.cdc.gov/Public-Health-Surveillance/Rates-of-Laboratory-Confirmed-RSV-COVID-19-and-Flu/kvib-3txy/about_data), construct the query:
+`cfasodapy` makes paginated queries to Socrata datasets. For example, to query [this CDC dataset](https://data.cdc.gov/Public-Health-Surveillance/Rates-of-Laboratory-Confirmed-RSV-COVID-19-and-Flu/kvib-3txy/about_data):
 
 ```python
-q = Query(domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN)
+import cfasodapy
+
+for page in cfasodapy.get_pages(domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN):
+    print(page)
 ```
 
 You can refine your query using [SoQL clauses](https://dev.socrata.com/docs/queries/query):
 
 ```python
-q = Query(
+cfasodapy.get_pages(
     domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN,
     where="sex='Overall' AND site='Overall'"
 )
 ```
 
-Having constructed the query, access the data page by page. Each page is a list of records:
+You can also:
 
-```python
-for page in q:
-    print(page)
-```
+- Get all the data at once with the convenience function `cfasodapy.get_all()`, which collapses across pages
+- Get column names and reported types with `cfasodapy.get_column_types()`
 
 ## Project admins
 
