@@ -9,6 +9,8 @@ A [sodapy](https://pypi.org/project/sodapy/) successor designed for paginated qu
 `cfasodapy` makes paginated queries to Socrata datasets. For example, to query [this CDC dataset](https://data.cdc.gov/Public-Health-Surveillance/Rates-of-Laboratory-Confirmed-RSV-COVID-19-and-Flu/kvib-3txy/about_data):
 
 ```python
+import cfasodapy
+
 for page in cfasodapy.get_pages(domain="data.cdc.gov", id="kvib-3txy", app_token=MY_APP_TOKEN):
     print(page)
 ```
