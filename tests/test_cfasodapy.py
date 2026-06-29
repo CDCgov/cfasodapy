@@ -29,19 +29,18 @@ class TestGet:
     page_size = 5
 
     @pytest.fixture
-    @classmethod
-    def mock_query(cls, monkeypatch):
+    def mock_query(self, monkeypatch):
         def mock_get_n_records(domain, id, app_token, where, verbose):
-            return cls.n_records
+            return self.n_records
 
         def mock_get_page(domain, id, app_token, query, page_number, page_size):
             start = page_size * (page_number - 1) + 1
             end = page_size * page_number
 
-            if start > cls.n_records:
+            if start > self.n_records:
                 return []
             else:
-                return list(range(start, min(end, cls.n_records) + 1))
+                return list(range(start, min(end, self.n_records) + 1))
 
         monkeypatch.setattr(cfasodapy, "_get_n_records", mock_get_n_records)
         monkeypatch.setattr(cfasodapy, "_get_page", mock_get_page)
