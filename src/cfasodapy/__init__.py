@@ -26,7 +26,7 @@ def get_pages(
         domain: base URL
         id: dataset ID
         app_token: Socrata developer app token
-        select: SELECT clause. A list of strings that will be backtick-quoted and comma-joined.
+        select: SELECT clause (string), or a sequence of column names (which will be backtick-quoted and comma-joined).
         where: filter condition
         page_size: page size
         verbose (bool): If True (default), print progress and warnings.
